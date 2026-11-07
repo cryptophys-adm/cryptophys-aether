@@ -56,9 +56,7 @@ The canon changes only by a reviewed PR. It has four parts:
 
 Findings are deterministic; no AI decides them. Reports are advisory and never `critical`.
 
-**Provisioning.** The build token needs **Vectorize: Edit**, and the Workers Builds build command is `npm run ensure:vectorize`. It runs before both the deploy command and the preview command.
-
-**Previews.** Pull request builds run `wrangler preview`, which needs the `previews` block in `wrangler.jsonc`. A preview has no cron trigger and no service binding. It serves `/health` and `/canon` only and reads the same indexes; the cron loops are their only writers, and they never run in a preview.
+**Provisioning.** The deploy workflow runs `npm run ensure:vectorize` before `wrangler deploy`. It creates both indexes and their metadata indexes when they are missing, never deletes or changes one, and fails closed when an existing index differs.
 
 ## Phases
 
@@ -72,6 +70,6 @@ Findings are deterministic; no AI decides them. Reports are advisory and never `
 
 ## Deploy
 
-Deploys run only by merging to `main`, through Cloudflare Workers Builds. The owner connects the repository once in the Cloudflare dashboard.
+Deploys run only by merging to `main`, through GitHub Actions (`.github/workflows/deploy.yml`): tests, the canon check, `ensure:vectorize`, `wrangler deploy` (4.45.0), then a `/health` check against the commit's canon. Pull requests run `ci.yml` only (tests and a dry run) and never see the token. The owner sets the repository secret `CLOUDFLARE_API_TOKEN` once; it needs Workers Scripts, D1 and Vectorize edit rights on the account.
 
 On the first deploy, Wrangler creates the D1 database `aether-knowledge` and links it to the Worker (automatic resource provisioning).

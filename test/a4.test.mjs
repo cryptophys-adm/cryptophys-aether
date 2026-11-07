@@ -145,3 +145,15 @@ test("ensure-vectorize reads wrangler 4.45 --json output: a progress line first,
   assert.equal(meta[0].propertyName, "part");
   assert.throws(() => parseWranglerJson("📋 Listing...\n[ not json"), "a broken JSON still fails closed");
 });
+
+test("the post-deploy health check wants ok, the commit's phase and canon, and readable indexes", async () => {
+  const { healthProblems, configuredPhase } = await import("../scripts/check-health.mjs");
+  assert.equal(configuredPhase(), "A4", "read from wrangler.jsonc");
+  const want = { canonSha: "abc", phase: "A4" };
+  const good = { service: "cryptophys-aether", status: "ok", phase: "A4", canon: { content_sha256: "abc" }, indexes: { canon: {} } };
+  assert.deepEqual(healthProblems(good, want), []);
+  assert.equal(healthProblems({ ...good, phase: "A2" }, want).length, 1, "the previous version still serving, same canon");
+  assert.equal(healthProblems({ ...good, canon: { content_sha256: "old" } }, want).length, 1);
+  assert.equal(healthProblems({ ...good, indexes: { error: "unavailable" } }, want).length, 1);
+  assert.ok(healthProblems(null, want).length >= 4);
+});

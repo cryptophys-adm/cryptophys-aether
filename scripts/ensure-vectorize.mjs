@@ -1,6 +1,6 @@
 // Idempotently provisions Aether's Vectorize indexes and their metadata indexes (phase A4), the way
-// the platform's ensure-vectorize-index.sh does for its agent memory. Run by the Workers Builds
-// build command before `wrangler deploy`; it needs a token with Vectorize edit permission.
+// the platform's ensure-vectorize-index.sh does for its agent memory. Run by the deploy workflow
+// (.github/workflows/deploy.yml) before `wrangler deploy`; it needs a token with Vectorize edit permission.
 // Never deletes or changes an existing index; fails closed when dimensions, metric or a metadata
 // index type differ. Metadata indexes are created before any vector is inserted (Vectorize filters
 // only on metadata indexes that existed when the vectors were written).
