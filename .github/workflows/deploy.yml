@@ -1,0 +1,42 @@
+name: deploy
+# The only deploy path of cryptophys-aether (AGENTS.md rule 2): a merge to main. Pull requests never
+# deploy and never see the token (ci.yml runs their tests and dry run). The token lives in the repository
+# secret CLOUDFLARE_API_TOKEN, which the owner sets; it is never printed or committed.
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 8f5d947aa98cc5d48e66fe35d3aef484
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Token is configured
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Repository secret CLOUDFLARE_API_TOKEN is not set (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+      - name: Tests
+        run: npm test
+      - name: Canon bundle is up to date
+        run: node scripts/build-canon.mjs --check
+      - name: Vectorize indexes (idempotent, never deletes)
+        run: node scripts/ensure-vectorize.mjs
+      - name: Deploy
+        run: npx --yes wrangler@4.45.0 deploy
+      - name: Health check
+        run: node scripts/check-health.mjs https://cryptophys-aether.afif-kw.workers.dev/health

@@ -3,10 +3,13 @@
   "private": true,
   "type": "module",
   "description": "Aether: the Knowledge Guardian cluster of the Cryptophys AI Mesh. Advisory only.",
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "test": "node --test",
     "canon:build": "node scripts/build-canon.mjs --write",
-    "canon:check": "node scripts/build-canon.mjs --check"
+    "canon:check": "node scripts/build-canon.mjs --check",
+    "ensure:vectorize": "node scripts/ensure-vectorize.mjs"
   }
 }
