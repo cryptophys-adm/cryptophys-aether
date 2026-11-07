@@ -31,5 +31,19 @@
   "vars": {
     "AETHER_PHASE": "A4",
     "AI_DAILY_LIMIT": "60"
+  },
+  // Worker Previews (pull request builds, `wrangler preview`). Previews get no cron trigger and no
+  // service binding, so the only writers of the indexes (the cron loops) never run there: a preview
+  // serves /health and /canon only and reads the same indexes. Its phase says it is a preview.
+  "previews": {
+    "vars": {
+      "AETHER_PHASE": "A4-preview",
+      "AI_DAILY_LIMIT": "1"
+    },
+    "vectorize": [
+      { "binding": "CANON_INDEX", "index_name": "aether-canon" },
+      { "binding": "MARKET_INDEX", "index_name": "aether-market" }
+    ],
+    "ai": { "binding": "AI" }
   }
 }

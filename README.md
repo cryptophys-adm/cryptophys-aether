@@ -56,7 +56,9 @@ The canon changes only by a reviewed PR. It has four parts:
 
 Findings are deterministic; no AI decides them. Reports are advisory and never `critical`.
 
-**Provisioning.** The build token needs **Vectorize: Edit**, and the Workers Builds build command is `npm run ensure:vectorize`.
+**Provisioning.** The build token needs **Vectorize: Edit**, and the Workers Builds build command is `npm run ensure:vectorize`. It runs before both the deploy command and the preview command.
+
+**Previews.** Pull request builds run `wrangler preview`, which needs the `previews` block in `wrangler.jsonc`. A preview has no cron trigger and no service binding. It serves `/health` and `/canon` only and reads the same indexes; the cron loops are their only writers, and they never run in a preview.
 
 ## Phases
 
