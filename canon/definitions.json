@@ -1,0 +1,11 @@
+{
+  "version": "aether.canon.definitions.v1",
+  "note": "Fixed yardsticks. The learning loop never tunes what measures it.",
+  "outcome_scoring": { "version": "cryptophys.outcome-scoring.v3", "horizon_candles": 4, "threshold_atr": 0.5, "atr_period": 14, "wait_rule": "a WAIT misses only a 2:1 move of 1 x ATR", "source": "xauusd src/outcome-scoring.mjs; owner decision 2 (2026-11-07)" },
+  "stuck_states": { "candles": 8, "range_atr": 3, "source": "xauusd src/outcome-scoring.mjs; owner decision 3 (2026-11-07)" },
+  "reputation": { "window_days": 30, "prior": 10, "weight_range": [0.25, 2], "neutral_band": 0.1, "source": "xauusd src/reputation.mjs (P7)" },
+  "shadow_promotion": { "test": "one-sided exact sign test on the bars where exactly one version is right", "alpha": 0.05, "minimum_bars": 200, "minimum_decisive_pairs": 30, "no_new_stuck_time": true, "source": "xauusd src/shadow-versions.mjs; P5 review (2026-11-07)" },
+  "parity": { "consecutive_matches": 24, "any_mismatch": "revokes", "source": "xauusd src/parity-registry.mjs" },
+  "compliance_checks": { "version": "cryptophys.compliance.v1", "checks": ["order_wording", "stance_bias_conflict", "calibration_talk", "natural_language", "data_scope"], "source": "xauusd src/compliance.mjs (Aether A1)" },
+  "decision_card": { "version": "cryptophys.decision-card.v1", "never_present": ["entry", "entry_price", "stop", "stop_loss", "take_profit", "tp1", "tp2", "trade_plan", "plan", "key_levels", "zones", "levels", "close", "price", "atr", "position_size_pct", "lots", "size"], "source": "xauusd src/decision-cards.mjs" }
+}
