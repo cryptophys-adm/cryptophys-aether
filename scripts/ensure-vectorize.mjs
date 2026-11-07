@@ -12,7 +12,19 @@ export const INDEXES = Object.freeze([
 ]);
 
 const wrangler = (args) => execFileSync("npx", ["--yes", "wrangler@4.45.0", "vectorize", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
-const json = (args) => JSON.parse(wrangler([...args, "--json"]));
+
+/**
+ * The JSON of a `wrangler vectorize ... --json` stdout. Wrangler 4.45 prints a progress line
+ * ("📋 Listing Vectorize indexes...") before the JSON, and prints no JSON at all when the list is
+ * empty (only a warning on stderr), so an empty list is []. Anything else that does not parse throws.
+ */
+export function parseWranglerJson(stdout) {
+  const lines = String(stdout ?? "").split("\n");
+  const start = lines.findIndex((l) => /^\s*[[{]/.test(l));
+  if (start < 0) return [];
+  return JSON.parse(lines.slice(start).join("\n"));
+}
+const json = (args) => parseWranglerJson(wrangler([...args, "--json"]));
 const fail = (msg) => { console.error("ensure-vectorize: " + msg); process.exit(1); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const metaList = (j) => (Array.isArray(j) ? j : j?.metadataIndexes ?? j?.metadata_indexes ?? j?.result?.metadataIndexes ?? []);
@@ -31,7 +43,7 @@ async function ensure(spec) {
     const has = () => metaList(json(["list-metadata-index", spec.name])).find((m) => (m.propertyName ?? m.property_name) === prop);
     let entry = has();
     if (!entry) {
-      wrangler(["create-metadata-index", spec.name, "--property-name", prop, "--type", type]);
+      wrangler(["create-metadata-index", spec.name, "--propertyName", prop, "--type", type]);
       for (let i = 0; i < 10 && !(entry = has()); i++) await sleep(3000);
       if (!entry) fail(`${spec.name}.${prop}: metadata index not visible after creation`);
     }

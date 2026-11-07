@@ -7,7 +7,7 @@ import { embedTexts, EMBED_DIMENSIONS, EMBED_BATCH } from "../src/embed.mjs";
 import { syncCanon, embedPendingCards, indexStatus, cardText, resetIndexSchemaCacheForTests } from "../src/indexes.mjs";
 import { complianceFindings, missesOf, runDigest, COMPLIANCE_WARN_PER_100 } from "../src/guardian.mjs";
 import { ingestCards, resetSchemaCacheForTests } from "../src/store.mjs";
-import { INDEXES } from "../scripts/ensure-vectorize.mjs";
+import { INDEXES, parseWranglerJson } from "../scripts/ensure-vectorize.mjs";
 import { CANON } from "../src/canon.generated.mjs";
 
 function d1() {
@@ -134,4 +134,14 @@ test("ensure-vectorize declares both indexes at 384 dimensions, cosine, with the
   const market = Object.fromEntries(byName["aether-market"].metadata);
   for (const k of ["kind", "chart", "session", "stance"]) assert.equal(market[k], "string");
   assert.equal(market.day, "number");
+});
+
+test("ensure-vectorize reads wrangler 4.45 --json output: a progress line first, and no JSON for an empty list", () => {
+  assert.deepEqual(parseWranglerJson("📋 Listing Vectorize indexes...\n"), [], "an account with no index yet");
+  assert.deepEqual(parseWranglerJson(""), []);
+  const listed = parseWranglerJson('📋 Listing Vectorize indexes...\n[\n  {\n    "name": "aether-canon",\n    "config": { "dimensions": 384, "metric": "cosine" }\n  }\n]\n');
+  assert.equal(listed[0].config.dimensions, 384);
+  const meta = parseWranglerJson('📋 Fetching metadata indexes...\n[\n  { "propertyName": "part", "indexType": "String" }\n]\n');
+  assert.equal(meta[0].propertyName, "part");
+  assert.throws(() => parseWranglerJson("📋 Listing...\n[ not json"), "a broken JSON still fails closed");
 });
