@@ -148,7 +148,7 @@ test("ensure-vectorize reads wrangler 4.45 --json output: a progress line first,
 
 test("the post-deploy health check wants ok, the commit's phase and canon, and readable indexes", async () => {
   const { healthProblems, configuredPhase } = await import("../scripts/check-health.mjs");
-  assert.equal(configuredPhase(), "A4", "read from wrangler.jsonc");
+  assert.equal(configuredPhase(), "A6", "read from wrangler.jsonc");
   const want = { canonSha: "abc", phase: "A4" };
   const good = { service: "cryptophys-aether", status: "ok", phase: "A4", canon: { content_sha256: "abc" }, indexes: { canon: {} } };
   assert.deepEqual(healthProblems(good, want), []);

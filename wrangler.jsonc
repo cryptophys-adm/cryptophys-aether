@@ -29,7 +29,7 @@
   ],
   "triggers": { "crons": ["52 * * * *"] },
   "vars": {
-    "AETHER_PHASE": "A4",
+    "AETHER_PHASE": "A6",
     "AI_DAILY_LIMIT": "60"
   }
 }
