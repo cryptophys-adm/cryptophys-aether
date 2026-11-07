@@ -58,15 +58,41 @@ Findings are deterministic; no AI decides them. Reports are advisory and never `
 
 **Provisioning.** The deploy workflow runs `npm run ensure:vectorize` before `wrangler deploy`. It creates both indexes and their metadata indexes when they are missing, never deletes or changes one, and fails closed when an existing index differs.
 
+## Phase A6: learned knowledge (curator and calibrator)
+
+`src/knowledge.mjs` runs deterministic rules over the stored decision cards (RFC §9.2). No AI decides a candidate.
+
+| Agent | Rule | Item |
+|---|---|---|
+| `aether-curator` | **Role drift:** over 7 days of cards (at least 6 days apart), an agent breaks one check in more than 5% of 20 or more rooms it spoke in, in 10 or more rooms | `role_reminder` |
+| `aether-curator` | **Agent pattern:** over 30 days, an agent is wrong more often in one chart and session than in its other situations (one-sided exact binomial p < 0.05, 12 or more decisive calls) | `caution` |
+| `aether-calibrator` | **Engine pattern:** 3 or more stuck episodes of a tuning family on the hourly cards in 30 days | `param_candidate`: the next untested point of `TUNING_GRID`, one open proposal per family |
+
+How a candidate travels:
+
+- **Proposed:** each candidate goes to the platform kernel with `knowledge.propose` (tier 1). The kernel validates it again (platform TP-028).
+  - The text is plain words with no 3-digit number, so rates are said in percent and counts stay in the evidence.
+  - The item cites 10 or more cards and the canon hash.
+- **Reviewed:** a person approves it for shadow testing, or rejects it, on the Console Knowledge page. `knowledge.status` brings the decision back every hour.
+- **Exported:** approved items form the **learned pack**, the RPC `KnowledgeIngress.learnedPack()`. It is labelled learned, is used for shadow testing only, and never appears in a live prompt.
+- **Promoted:** only by an owner PR in xauusd (A7 to A9).
+
+Limits:
+- At most 3 proposals per agent per run, once a day at 02:52 UTC.
+- A rejected or refused item is not proposed again for 14 days.
+- A denial ends the run, with no retry.
+
+`/health` shows the ledger counts under `knowledge`.
+
 ## Phases
 
 | Phase | Content |
 |---|---|
-| A2 (this) | Worker, D1 `aether-knowledge`, `KnowledgeIngress`, Canon v1, CI |
+| A2 | Worker, D1 `aether-knowledge`, `KnowledgeIngress`, Canon v1, CI |
 | A3 | Platform registers the `cryptophys-aether` host and its agents; the `AGENTS` binding |
 | A4 | Vectorize `aether-canon` and `aether-market`, batched embeddings, the auditor and guardian loops |
 | A5 | xauusd pushes its cards here |
-| A6 | Curator and calibrator: tier 1 proposals and the approved learned pack |
+| A6 (live) | Curator and calibrator: tier 1 proposals and the approved learned pack |
 
 ## Deploy
 
