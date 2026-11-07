@@ -13,10 +13,23 @@
   "d1_databases": [
     { "binding": "AETHER_DB", "database_name": "aether-knowledge" }
   ],
+  // Phase A4 (RFC §0.3): Aether's own Vectorize indexes, separate from the kernel's agent memory
+  // (state market vs state machine). Wrangler does not provision Vectorize: the build command runs
+  // scripts/ensure-vectorize.mjs first (idempotent, never deletes, fails closed on a mismatch).
+  "vectorize": [
+    { "binding": "CANON_INDEX", "index_name": "aether-canon" },
+    { "binding": "MARKET_INDEX", "index_name": "aether-market" }
+  ],
+  // Workers AI for embeddings only (bge-small-en-v1.5), within AI_DAILY_LIMIT requests a day.
+  "ai": { "binding": "AI" },
+  // Phase A3 (platform TP-027, deployed 2026-11-07): the kernel's AgentRpc, as host cryptophys-aether.
+  // No secret: the caller identity is the pinned host_worker. Reports only (knowledge_audit).
+  "services": [
+    { "binding": "AGENTS", "service": "cryptophys-ai-kernel", "entrypoint": "AgentRpc", "props": { "host_worker": "cryptophys-aether" } }
+  ],
+  "triggers": { "crons": ["52 * * * *"] },
   "vars": {
-    "AETHER_PHASE": "A2"
+    "AETHER_PHASE": "A4",
+    "AI_DAILY_LIMIT": "60"
   }
-  // Phase A3 adds the AGENTS Service Binding to the platform kernel (AgentRpc, props.host_worker =
-  // "cryptophys-aether") once the platform registers the host and its agents. Phase A4 adds the
-  // Workers AI binding and the Vectorize indexes aether-canon and aether-market.
 }

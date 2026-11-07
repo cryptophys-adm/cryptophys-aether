@@ -28,13 +28,35 @@ The canon changes only by a reviewed PR. It has four parts:
 
 `npm run canon:build` bundles the canon into `src/canon.generated.mjs`, with a content hash over every file.
 
-## Interfaces (phase A2)
+## Interfaces
 
-- `GET /health`: status, the canon version and hash, and card counts. It never returns card content.
+- `GET /health`: status, the canon version and hash, card counts, index status, and AI budget use. It never returns card content.
 - `GET /canon`: the canon's version, its file hashes and the doctrine.
 - `RPC KnowledgeIngress`, reached through a Service Binding from the xauusd AI Worker in phase A5:
   - `ingestCards(cards)`: stores `cryptophys.decision-card.v1` cards, at most 50 per call. Any card carrying a level or a price is refused.
   - `canonInfo()`: the canon's version and hashes.
+
+## Phase A4: indexes, guardian and auditor
+
+**Vectorize indexes.** Both are owned by Aether, use 384 dimensions and cosine distance, and are provisioned by `scripts/ensure-vectorize.mjs`.
+
+| Index | Binding | Holds | Metadata indexes |
+|---|---|---|---|
+| `aether-canon` | `CANON_INDEX` | Canon chunks, one set per canon version | `part`, `canon` |
+| `aether-market` | `MARKET_INDEX` | Decision cards, namespace `decision` | `kind`, `chart`, `session`, `stance`, `day` |
+
+**Embeddings.** `@cf/baai/bge-small-en-v1.5`, in batches of 50. Each batch counts as one request against `AI_DAILY_LIMIT` (60 a day), and the count is kept in D1.
+
+**Cron, every hour at :52:**
+- Sync the canon. This embeds the canon only when its version changes.
+- Embed new or updated cards.
+- At 01:52 UTC, publish two daily reports to the kernel as `knowledge_audit`, through `AGENTS` (AgentRpc, host `cryptophys-aether`):
+  - **Guardian:** compliance per agent and check. It is a `warning` from 20 rule breaks per 100 messages.
+  - **Auditor:** repeated failures, meaning a missed call whose 5 most similar past situations hold 3 or more misses by the same agent.
+
+Findings are deterministic; no AI decides them. Reports are advisory and never `critical`.
+
+**Provisioning.** The build token needs **Vectorize: Edit**, and the Workers Builds build command is `npm run ensure:vectorize`.
 
 ## Phases
 
