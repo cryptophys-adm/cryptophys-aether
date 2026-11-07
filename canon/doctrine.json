@@ -1,0 +1,18 @@
+{
+  "version": "aether.canon.doctrine.v1",
+  "note": "The owner's rules in force for the XAUUSD advisory system, each with its source. Changed only by a reviewed PR in this repository.",
+  "rules": [
+    { "id": "advisory_only", "rule": "Advisory only: no broker integration, no orders, no automatic execution and no position size.", "source": "xauusd AGENTS.md rule 8", "since": "2026-10" },
+    { "id": "no_levels_to_kernel", "rule": "Reports to the platform kernel never carry price levels (entry, stop, target, zones, key levels).", "source": "xauusd docs/SSOT.md §2", "since": "2026-11-05" },
+    { "id": "no_confirmation_no_entry", "rule": "BUY needs a confirmed buy signal (the H1 Prophet R38 confirmation, or a verified 5m Prophet R38 confirmation candle); SELL needs a confirmed sell. Without it the stance is WAIT.", "source": "xauusd src/war-room.mjs CONFIRMATION_RULE; owner decision", "since": "2026-11-05" },
+    { "id": "bias_beside_action", "rule": "Every opening states its action and its bias (BULLISH, BEARISH or NEUTRAL): the direction its own data leans, even when the action is WAIT.", "source": "xauusd docs/SSOT.md, Bias beside the action", "since": "2026-11-06" },
+    { "id": "support_rules", "rule": "A BUY or SELL conclusion needs at least one agent holding that stance; a BULLISH or BEARISH bias needs at least one agent holding it.", "source": "xauusd docs/SSOT.md, Conclusion", "since": "2026-11-06" },
+    { "id": "calibration_status_once", "rule": "Agents never mention calibration, parity or verification in their text; readers see each agent's calibration status once, next to its name. An agent with no calibrated statement speaks at confidence 0.4 or lower.", "source": "xauusd docs/SSOT.md, Calibration status once", "since": "2026-11-05" },
+    { "id": "own_data_only", "rule": "Each HUD or indicator agent analyses only the data its own HUD or indicator produces.", "source": "xauusd docs/SSOT.md; RFC_HUD_AGENTS", "since": "2026-11-05" },
+    { "id": "fail_closed_wait", "rule": "Without valid, verified evidence the H1 decision is WAIT, never a guess.", "source": "xauusd docs/SSOT.md, H1 chain", "since": "2026-10" },
+    { "id": "parity_trust_only", "rule": "Local engine trust comes only from the parity registry (24 consecutive matching candles); nothing is marked verified by hand, and the Pine sources and hashed engines are never edited.", "source": "xauusd AGENTS.md rule 6", "since": "2026-10" },
+    { "id": "promotion_by_owner", "rule": "No change to an engine parameter, a prompt or a knowledge item is promoted automatically: candidates run in shadow, are judged by outcome scoring with a significance test, and the owner approves a separate promotion PR.", "source": "RFC_INDICATOR_AGENT_PLATFORM §4.3, §10 decision 1; RFC_AETHER_KNOWLEDGE_GUARDIAN §9", "since": "2026-11-05" },
+    { "id": "learned_is_not_canon", "rule": "Learned knowledge is labelled as learned, cites its evidence, and never redefines a field or a rule of the canon.", "source": "RFC_AETHER_KNOWLEDGE_GUARDIAN §0.4, §8", "since": "2026-11-07" },
+    { "id": "kernel_rules", "rule": "Calls to the platform kernel use RPC Service Bindings without shared secrets; reports are info or warning, never critical; a denial is final (no retry, no switching agent ids).", "source": "xauusd AGENTS.md rule 7; platform docs/XAUUSD-INTEGRATION.md", "since": "2026-11" }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/wrangler@4.45.0/config-schema.json",
+  // Aether, the Knowledge Guardian cluster (RFC_AETHER_KNOWLEDGE_GUARDIAN in xauusd-ai-trading-assistant).
+  // Deployed only by merging to main (Cloudflare Workers Builds). Never by hand.
+  "name": "cryptophys-aether",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-10-31",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  // D1 aether-knowledge: no database_id on purpose. Wrangler (>= 4.45) provisions it on the first
+  // deploy and links it to the Worker (automatic resource provisioning). Its schema is ensured at
+  // runtime (src/store.mjs).
+  "d1_databases": [
+    { "binding": "AETHER_DB", "database_name": "aether-knowledge" }
+  ],
+  "vars": {
+    "AETHER_PHASE": "A2"
+  }
+  // Phase A3 adds the AGENTS Service Binding to the platform kernel (AgentRpc, props.host_worker =
+  // "cryptophys-aether") once the platform registers the host and its agents. Phase A4 adds the
+  // Workers AI binding and the Vectorize indexes aether-canon and aether-market.
+}

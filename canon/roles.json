@@ -1,0 +1,413 @@
+{
+  "version": "aether.canon.roles.v1",
+  "source": {
+    "repository": "cryptophys-adm/xauusd-ai-trading-assistant",
+    "file": "src/indicator-manifests.mjs",
+    "manifest_version": "cryptophys.indicator-manifest.v1",
+    "imported_on": "2026-11-07"
+  },
+  "agents": [
+    {
+      "id": "prophet_r38",
+      "kind": "engine",
+      "name": "Prophet R38",
+      "family": "structure",
+      "reads": "Prophet R38",
+      "reference": "pine_ssot",
+      "rooms": [],
+      "computed": true
+    },
+    {
+      "id": "prophet_r37",
+      "kind": "engine",
+      "name": "Prophet R37 (GMI shared core)",
+      "family": "structure",
+      "reads": "GMI v12.70 (embedded Prophet R37)",
+      "reference": "pine_ssot",
+      "rooms": [],
+      "computed": true
+    },
+    {
+      "id": "gmi_v12_70",
+      "kind": "engine",
+      "name": "GMI v12.70",
+      "family": "trend",
+      "reads": "GMI v12.70",
+      "reference": "pine_ssot",
+      "rooms": [],
+      "computed": true
+    },
+    {
+      "id": "mizan",
+      "kind": "library",
+      "name": "CryptophysMizanLib",
+      "family": "library",
+      "reads": "CryptophysMizanLib",
+      "reference": "pine_ssot",
+      "rooms": [],
+      "computed": true
+    },
+    {
+      "id": "r37_funnel",
+      "kind": "hud",
+      "name": "R37 Funnel",
+      "family": "structure",
+      "reads": "Prophet R38, funnel_table",
+      "reference": "pine_ssot",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "prophet",
+      "kind": "hud",
+      "name": "Prophet",
+      "family": "structure",
+      "reads": "Prophet R38, hud",
+      "reference": "pine_ssot",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "trade_management",
+      "kind": "hud",
+      "name": "Trade Management",
+      "family": "execution",
+      "reads": "Prophet R38, trade_management_hud",
+      "reference": "pine_ssot",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "interstellar_eyes",
+      "kind": "hud",
+      "name": "The Interstellar Eyes",
+      "family": "levels",
+      "reads": "GMI v12.70, hud_main col 0",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "kinetic_engine",
+      "kind": "hud",
+      "name": "Kinetic Engine (TVA)",
+      "family": "trend",
+      "reads": "GMI v12.70, hud_main col 7",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "fabio_amt",
+      "kind": "hud",
+      "name": "Fabio AMT Sensors",
+      "family": "volume",
+      "reads": "GMI v12.70, hud_main col 9",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "chronos_matrix",
+      "kind": "hud",
+      "name": "Chronos Matrix",
+      "family": "levels",
+      "reads": "GMI v12.70, hud_aegis top",
+      "reference": "pine_ssot",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "aegis_footprint",
+      "kind": "hud",
+      "name": "Aegis Footprint Matrix",
+      "family": "order flow",
+      "reads": "GMI v12.70, hud_aegis lower",
+      "reference": "pine_ssot",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "tactical_muscles",
+      "kind": "hud",
+      "name": "Tactical Muscles",
+      "family": "momentum",
+      "reads": "GMI v12.70, hud_tdm section 1",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "macro_aether",
+      "kind": "hud",
+      "name": "Macro & Aether Sensors",
+      "family": "macro",
+      "reads": "GMI v12.70, hud_tdm section 2",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "gabfx_price_action",
+      "kind": "hud",
+      "name": "GABFX Price Action",
+      "family": "price action",
+      "reads": "GMI v12.70, hud_tdm section 3",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "playbook_execution",
+      "kind": "hud",
+      "name": "Playbook Execution",
+      "family": "execution",
+      "reads": "GMI v12.70, hud_tdm section 4",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "decision_matrix",
+      "kind": "hud",
+      "name": "Decision Matrix",
+      "family": "trend",
+      "reads": "GMI v12.70, hud_tdm section 5",
+      "reference": "pine_ssot",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "grid_bot_protocol",
+      "kind": "hud",
+      "name": "Grid Bot Protocol",
+      "family": "execution",
+      "reads": "GMI v12.70, hud_tdm section 6",
+      "reference": "pine_candidate",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "supertrend",
+      "kind": "indicator",
+      "name": "Supertrend",
+      "family": "trend",
+      "reads": "TradingView built-in ta.supertrend(3, 10)",
+      "reference": "builtin",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "order_blocks",
+      "kind": "indicator",
+      "name": "Order Blocks",
+      "family": "order flow",
+      "reads": "Prophet R38 order-block filter and GMI v12.70 Aegis validated blocks",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "m15",
+      "kind": "desk",
+      "name": "15m Desk",
+      "family": "timeframe desk",
+      "reads": "Prophet R38, Prophet R37, GMI v12.70 (15m records)",
+      "reference": "pine_ssot",
+      "rooms": [
+        "M15"
+      ],
+      "computed": true
+    },
+    {
+      "id": "h1",
+      "kind": "desk",
+      "name": "1H Desk",
+      "family": "timeframe desk",
+      "reads": "Prophet R38, Prophet R37, GMI v12.70 (1H records)",
+      "reference": "pine_ssot",
+      "rooms": [
+        "H1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "h4",
+      "kind": "desk",
+      "name": "4H Desk",
+      "family": "timeframe desk",
+      "reads": "Prophet R38, Prophet R37, GMI v12.70 (4H records)",
+      "reference": "pine_ssot",
+      "rooms": [
+        "H4"
+      ],
+      "computed": true
+    },
+    {
+      "id": "d1",
+      "kind": "desk",
+      "name": "D1 Desk",
+      "family": "timeframe desk",
+      "reads": "Prophet R38, Prophet R37, GMI v12.70 (D1 records)",
+      "reference": "pine_ssot",
+      "rooms": [
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "htf",
+      "kind": "desk",
+      "name": "Higher-Timeframe Desk",
+      "family": "higher timeframe",
+      "reads": "the next higher room's conclusion",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4"
+      ],
+      "computed": true
+    },
+    {
+      "id": "news",
+      "kind": "desk",
+      "name": "News Analyst",
+      "family": "fundamentals",
+      "reads": "News Daily",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "technical",
+      "kind": "desk",
+      "name": "Technical Analyst",
+      "family": "price action",
+      "reads": "closed candles of the room's chart",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "risk",
+      "kind": "desk",
+      "name": "Risk Manager",
+      "family": "risk",
+      "reads": "volatility, confirmations, conflicts",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    },
+    {
+      "id": "moderator",
+      "kind": "moderator",
+      "name": "Moderator",
+      "family": "moderator",
+      "reads": "the room's bus, Consensus Discussion and crowd line",
+      "reference": "none",
+      "rooms": [
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "computed": true
+    }
+  ]
+}
