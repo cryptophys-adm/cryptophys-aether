@@ -40,7 +40,7 @@ async function main() {
   let last = "no answer";
   for (let i = 0; i < 6; i++) {
     try {
-      const deployments = (await api("/deployments"))?.deployments || [];
+      const deployments = ((await api("/deployments"))?.deployments || []).slice().sort((a, b) => Date.parse(b.created_on) - Date.parse(a.created_on));
       const deployment = deployments[0] ?? null;
       const versionId = deployment?.versions?.[0]?.version_id;
       const version = versionId ? await api(`/versions/${versionId}`) : null;
