@@ -79,3 +79,42 @@ test("a weighting report is summarised: better candidates first, the latest hist
   assert.equal(s.agents[0].weight, 1.2);
   assert.equal(weightingSummary("15", null).rooms, 0);
 });
+
+test("the sync checks: fresh feeds are ok; a stale feed warns while the market was open and idles over the weekend", async () => {
+  const { syncChecks, marketOpen } = await import("../src/reader.mjs");
+  const MON = Date.parse("2026-11-09T12:00:00Z");
+  const iso = (ms) => new Date(ms).toISOString();
+  const base = { now: MON, lastIngestAt: iso(MON - 30 * 60_000), canonIndexedSha: "a".repeat(64), canonSha: "a".repeat(64), canonIndexedAt: iso(MON - 5 * 3_600_000), oldestPendingAt: iso(MON - 20 * 60_000), pending: 3, weighting: [{ timeframe: "15", received_at: iso(MON - 3_600_000) }, { timeframe: "1D", received_at: iso(MON - 20 * 3_600_000) }], aiUsed: 13, aiLimit: 60, kbSha: "k" };
+  const ok = syncChecks(base);
+  assert.equal(ok.overall, "ok");
+  assert.deepEqual(Object.keys(ok.checks), ["ingest", "canon_index", "embed_backlog", "weighting_15", "weighting_1D", "ai_budget"]);
+  assert.equal(ok.kb_content_sha256, "k");
+  const stale = syncChecks({ ...base, lastIngestAt: iso(MON - 3 * 3_600_000) });
+  assert.equal(stale.overall, "warn");
+  assert.equal(stale.checks.ingest.status, "warn");
+  assert.equal(syncChecks({ ...base, lastIngestAt: null }).checks.ingest.status, "warn", "never ingested while open");
+  const SUN = Date.parse("2026-11-08T12:00:00Z");
+  assert.equal(marketOpen(SUN), false);
+  assert.equal(marketOpen(Date.parse("2026-11-08T22:30:00Z")), true, "Sunday reopen");
+  assert.equal(marketOpen(Date.parse("2026-11-07T08:00:00Z")), false, "Saturday");
+  assert.equal(syncChecks({ ...base, now: SUN, lastIngestAt: iso(SUN - 30 * 3_600_000) }).checks.ingest.status, "idle", "the weekend is no outage");
+  assert.equal(syncChecks({ ...base, canonIndexedSha: "b".repeat(64), canonIndexedAt: iso(MON - 30 * 60_000) }).checks.canon_index.status, "ok", "a new canon waits for the hourly run");
+  assert.equal(syncChecks({ ...base, canonIndexedSha: "b".repeat(64), canonIndexedAt: iso(MON - 5 * 3_600_000) }).checks.canon_index.status, "warn");
+  assert.equal(syncChecks({ ...base, oldestPendingAt: iso(MON - 3 * 3_600_000) }).checks.embed_backlog.status, "warn");
+  assert.equal(syncChecks({ ...base, pending: 0, oldestPendingAt: null }).checks.embed_backlog.status, "ok");
+  assert.equal(syncChecks({ ...base, weighting: [{ timeframe: "60", received_at: iso(MON - 4 * 3_600_000) }] }).checks.weighting_60.status, "warn");
+  assert.equal(syncChecks({ ...base, aiUsed: 60 }).checks.ai_budget.status, "warn");
+});
+
+test("aetherSync reads D1 and never throws; the overview carries it", async () => {
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests(); resetWeightingSchemaCacheForTests();
+  const { aetherSync } = await import("../src/reader.mjs");
+  const db = d1();
+  await ingestCards(db, [card(0)], { now: NOW });
+  const s = await aetherSync({ AETHER_DB: db }, { now: NOW + 600_000 });
+  assert.equal(s.checks.ingest.status, "ok");
+  assert.equal(s.checks.canon_index.status, "warn", "never indexed");
+  assert.equal(s.kb_content_sha256, CANON.indicator.kb_content_sha256);
+  assert.equal((await aetherSync({}, { now: NOW })).checks.ingest.status, "warn", "no database: the check says so");
+  assert.ok((await aetherOverview({ AETHER_DB: db }, { now: NOW })).sync.checks);
+});
