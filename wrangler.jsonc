@@ -5,7 +5,10 @@
   "name": "cryptophys-aether",
   "main": "src/index.mjs",
   "compatibility_date": "2026-10-31",
-  "workers_dev": true,
+  // No public workers.dev or preview URL (owner 2026-11-09): Aether is read through the Nexus Aether page
+  // (AetherReader) and written through KnowledgeIngress, both RPC Service Bindings only.
+  "workers_dev": false,
+  "preview_urls": false,
   "observability": { "enabled": true },
   // D1 aether-knowledge: no database_id on purpose. Wrangler (>= 4.45) provisions it on the first
   // deploy and links it to the Worker (automatic resource provisioning). Its schema is ensured at

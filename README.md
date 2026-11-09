@@ -30,7 +30,7 @@ The canon changes only by a reviewed PR. It has four parts:
 
 ## Interfaces
 
-- `GET /health`: status, the canon version and hash, card counts, index status, and AI budget use. It never returns card content.
+- `GET /health`: status, the canon version and hash, card counts, index status, and AI budget use. It never returns card content. Since 2026-11-09 Aether has no public URL (`workers_dev` and `preview_urls` false), so `/health` is not reachable from outside; the same data is on the Nexus Aether page (`AetherReader`).
 - `GET /canon`: the canon's version, its file hashes and the doctrine.
 - `RPC AetherReader`, reached through a Service Binding from the Nexus Worker: `overview()` for the Aether page at `nexus.cryptophys.work/aether` (owner 2026-11-09; behind the same Cloudflare Access sign-in as Nexus). It is read-only and returns the canon and its doctrine, card counts and the ingest log, the index status, the AI budget, the knowledge proposals, the guardian's compliance findings of the last 24 hours, and each timeframe's weighting report (`src/reader.mjs`). It never returns a price.
 - `RPC KnowledgeIngress`, reached through a Service Binding from the xauusd AI Worker in phase A5:
@@ -101,6 +101,6 @@ Limits:
 
 ## Deploy
 
-Deploys run only by merging to `main`, through GitHub Actions (`.github/workflows/deploy.yml`): tests, the canon check, `ensure:vectorize`, `wrangler deploy` (4.45.0), then a `/health` check against the commit's canon. Pull requests run `ci.yml` only (tests and a dry run) and never see the token. The owner sets the repository secret `CLOUDFLARE_API_TOKEN` once; it needs Workers Scripts, D1 and Vectorize edit rights on the account.
+Deploys run only by merging to `main`, through GitHub Actions (`.github/workflows/deploy.yml`): tests, the canon check, `ensure:vectorize`, `wrangler deploy` (4.45.0, tagged with the commit), then `scripts/check-deployment.mjs`: through the Cloudflare API, the active deployment serves 100 % of traffic with this commit's version, and workers.dev stays off. (Aether has no public URL since 2026-11-09, so the former `/health` check no longer applies; `scripts/check-health.mjs` stays for a check through `wrangler dev`.) Pull requests run `ci.yml` only (tests and a dry run) and never see the token. The owner sets the repository secret `CLOUDFLARE_API_TOKEN` once; it needs Workers Scripts, D1 and Vectorize edit rights on the account (Workers Scripts read covers the deployment check).
 
 On the first deploy, Wrangler creates the D1 database `aether-knowledge` and links it to the Worker (automatic resource provisioning).
