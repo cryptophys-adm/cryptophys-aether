@@ -157,3 +157,16 @@ test("the post-deploy health check wants ok, the commit's phase and canon, and r
   assert.equal(healthProblems({ ...good, indexes: { error: "unavailable" } }, want).length, 1);
   assert.ok(healthProblems(null, want).length >= 4);
 });
+
+test("the deployment check: this commit's version at 100 %, workers.dev off", async () => {
+  const { deploymentProblems } = await import("../scripts/check-deployment.mjs");
+  const deployment = { created_on: "2026-11-09T12:00:00Z", versions: [{ version_id: "v1", percentage: 100 }] };
+  const ok = { deployment, version: { annotations: { "workers/tag": "abc123def456" } }, subdomain: { enabled: false }, tag: "abc123def456", startedMs: Date.parse("2026-11-09T11:59:00Z") };
+  assert.deepEqual(deploymentProblems(ok), []);
+  assert.match(deploymentProblems({ ...ok, version: { annotations: { "workers/tag": "old" } } }).join(), /tag old/);
+  assert.match(deploymentProblems({ ...ok, subdomain: { enabled: true } }).join(), /workers.dev is on/);
+  assert.match(deploymentProblems({ ...ok, deployment: { ...deployment, versions: [{ version_id: "v1", percentage: 50 }, { version_id: "v0", percentage: 50 }] } }).join(), /traffic split/);
+  assert.deepEqual(deploymentProblems({ ...ok, version: {} }), [], "no tag in the API: a deployment created in this run passes");
+  assert.match(deploymentProblems({ ...ok, version: {}, startedMs: Date.parse("2026-11-09T13:00:00Z") }).join(), /not from this run/);
+  assert.match(deploymentProblems({ ...ok, deployment: null }).join(), /no active deployment/);
+});

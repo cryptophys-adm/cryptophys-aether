@@ -37,6 +37,11 @@ jobs:
       - name: Vectorize indexes (idempotent, never deletes)
         run: node scripts/ensure-vectorize.mjs
       - name: Deploy
-        run: npx --yes wrangler@4.45.0 deploy
-      - name: Health check
-        run: node scripts/check-health.mjs https://cryptophys-aether.afif-kw.workers.dev/health
+        run: |
+          echo "DEPLOY_STARTED_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
+          npx --yes wrangler@4.45.0 deploy --tag "${GITHUB_SHA::12}" --message "commit ${GITHUB_SHA}"
+      # No public URL since 2026-11-09 (workers_dev false): the check reads the Cloudflare API.
+      - name: Deployment check
+        env:
+          COMMIT_TAG: ${{ github.sha }}
+        run: COMMIT_TAG="${COMMIT_TAG::12}" node scripts/check-deployment.mjs
