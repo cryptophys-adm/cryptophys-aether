@@ -36,7 +36,7 @@ The canon changes only by a reviewed PR. It has four parts:
   - `ingestCards(cards)`: stores `cryptophys.decision-card.v1` cards, at most 50 per call. Any card carrying a level or a price is refused.
   - `canonInfo()`: the canon's version and hashes.
   - `learnedPack()`: the approved learned pack (phase A6).
-  - `ingestWeightingReport(report)`: xauusd's H1 quorum weighting replay (`cryptophys.weighting-report.v1`), hourly; the latest valid report is kept in D1 `weighting_reports`. A report with a price, level or size key is refused.
+  - `ingestWeightingReport(report)`: xauusd's room quorum weighting replay of one timeframe (`cryptophys.weighting-report.v1`, `mode: "auto"`), when it changed; the latest valid report of each timeframe is kept in D1 `weighting_reports_tf` as an audit. A report with a price, level or size key is refused.
 
 ## Phase A4: indexes, guardian and auditor
 
@@ -69,7 +69,7 @@ Findings are deterministic; no AI decides them. Reports are advisory and never `
 | `aether-curator` | **Role drift:** over 7 days of cards (at least 6 days apart), an agent breaks one check in more than 5% of 20 or more rooms it spoke in, in 10 or more rooms | `role_reminder` |
 | `aether-curator` | **Agent pattern:** over 30 days, an agent is wrong more often in one chart and session than in its other situations (one-sided exact binomial p < 0.05, 12 or more decisive calls) | `caution` |
 | `aether-calibrator` | **Engine pattern:** 3 or more stuck episodes of a tuning family on the hourly cards in 30 days | `param_candidate`: the next untested point of `TUNING_GRID`, one open proposal per family |
-| `aether-calibrator` | **Weighting pattern** (owner decisions 2026-11-09): in xauusd's latest weighting report, a grid point next to the active H1 quorum weighting is rated `better_than_active` on discovery (Holm) and on a complete 100-room holdout; the lowest adjusted p first | `param_candidate` of family `weighting` with the full point, one open proposal at a time (`src/weighting.mjs`) |
+| `aether-calibrator` | **Weighting pattern**: retired the same day (owner decisions 2026-11-09): xauusd now tunes and activates its weighting automatically (`mode: "auto"`), so the calibrator proposes no weighting point; a report without that mode is still handled as before | none in auto mode |
 
 How a candidate travels:
 
@@ -78,14 +78,14 @@ How a candidate travels:
   - The item cites 10 or more cards and the canon hash.
 - **Reviewed:** a person approves it for shadow testing, or rejects it, on the Console Knowledge page. `knowledge.status` brings the decision back every hour.
 - **Exported:** approved items form the **learned pack**, the RPC `KnowledgeIngress.learnedPack()`. It is labelled learned, is used for shadow testing only, and never appears in a live prompt.
-- **Promoted:** only by an owner PR in xauusd (A7 to A9). **The exception is the `weighting` family** (owner decision 2026-11-09): approving it in the Console activates that H1 quorum weighting in xauusd within the hour, while xauusd's replay still rates it better, and xauusd rolls it back automatically if it does worse in reverse shadow. Its text says so.
+- **Promoted:** only by an owner PR in xauusd (A7 to A9). The room quorum weighting is the exception: xauusd tunes it automatically per timeframe and regime (owner decisions 2026-11-09), and Aether audits it.
 
 Limits:
 - At most 3 proposals per agent per run, once a day at 02:52 UTC.
 - A rejected or refused item is not proposed again for 14 days.
 - A denial ends the run, with no retry.
 
-`/health` shows the ledger counts under `knowledge`, and the latest weighting report under `weighting` (when it arrived, the active point, the candidates rated better).
+`/health` shows the ledger counts under `knowledge`, and the latest weighting report of each timeframe under `weighting` (when it arrived, its mode, the active point, the regimes, the candidates rated better, the last change).
 
 ## Phases
 

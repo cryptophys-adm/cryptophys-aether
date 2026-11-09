@@ -14,12 +14,12 @@ test("the canon has its four parts and a content hash over every file", () => {
   assert.match(c.content_sha256, /^[a-f0-9]{64}$/);
   assert.equal(CANON.content_sha256, c.content_sha256);
   assert.equal(c.indicator.kb_version, 4);
-  assert.equal(c.indicator.kb_content_sha256, "fa40bb17c65344378fa93099547b2ad174c13f0780f85f381fb8f3bce5456df9", "KB v4 is imported as is (xauusd 2026-11-09: the H1 quorum and its weighting), pinned by its hash");
+  assert.equal(c.indicator.kb_content_sha256, "0e23c15b9c1d044638441aca1c82af119b46f0fbd43cca194c75a07f907e245e", "KB v4 is imported as is (xauusd 2026-11-09: the room quorum, its automatic weighting per timeframe and regime), pinned by its hash");
 });
 
 test("the doctrine carries the owner rules the guardian checks, each with a source", () => {
   const ids = CANON.doctrine.rules.map((r) => r.id);
-  for (const id of ["advisory_only", "no_levels_to_kernel", "no_confirmation_no_entry", "h1_quorum", "calibration_status_once", "own_data_only", "promotion_by_owner", "weighting_by_approval", "learned_is_not_canon", "kernel_rules"]) assert.ok(ids.includes(id), id);
+  for (const id of ["advisory_only", "no_levels_to_kernel", "no_confirmation_no_entry", "h1_quorum", "calibration_status_once", "own_data_only", "promotion_by_owner", "weighting_auto", "independent_rooms", "learned_is_not_canon", "kernel_rules"]) assert.ok(ids.includes(id), id);
   assert.ok(CANON.doctrine.rules.every((r) => r.rule && r.source && r.since));
   assert.equal(new Set(ids).size, ids.length);
 });
