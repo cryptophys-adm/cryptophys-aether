@@ -1,9 +1,10 @@
 // Post-deploy check (deploy.yml). Aether has no public URL since 2026-11-09 (workers_dev false), so the
 // check reads the Cloudflare API instead of /health: the active deployment serves 100 % of traffic with
-// the version this commit uploaded (tagged with the commit), and workers.dev stays off. The runtime view
+// the version this run deployed (created after the deploy step began; Wrangler 4.45's deploy takes no
+// --tag, so a tag is compared only when one is set), and workers.dev stays off. The runtime view
 // (canon, cards, weighting) is on the Nexus Aether page. Reads only; prints no secret.
-//   env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, COMMIT_TAG (the tag passed to wrangler deploy),
-//        DEPLOY_STARTED_MS (when the deploy step started; used only if the API shows no tag)
+//   env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, DEPLOY_STARTED_MS (when the deploy step started),
+//        optional COMMIT_TAG (compared with the version's workers/tag annotation when both exist)
 
 const SCRIPT = "cryptophys-aether";
 
@@ -14,7 +15,7 @@ export function deploymentProblems({ deployment, version, subdomain, tag, starte
   if (!deployment) out.push("no active deployment");
   else if (versions.length !== 1 || versions[0].percentage !== 100) out.push(`traffic split ${JSON.stringify(versions.map((v) => [v.version_id, v.percentage]))}`);
   const versionTag = version?.annotations?.["workers/tag"] ?? version?.metadata?.annotations?.["workers/tag"] ?? null;
-  if (versionTag != null) {
+  if (tag && versionTag != null) {
     if (versionTag !== tag) out.push(`active version tag ${versionTag} != ${tag}`);
   } else {
     const created = Date.parse(deployment?.created_on ?? "");
@@ -39,13 +40,13 @@ async function main() {
   let last = "no answer";
   for (let i = 0; i < 6; i++) {
     try {
-      const deployments = (await api("/deployments"))?.deployments || [];
+      const deployments = ((await api("/deployments"))?.deployments || []).slice().sort((a, b) => Date.parse(b.created_on) - Date.parse(a.created_on));
       const deployment = deployments[0] ?? null;
       const versionId = deployment?.versions?.[0]?.version_id;
       const version = versionId ? await api(`/versions/${versionId}`) : null;
       const subdomain = await api("/subdomain");
       const problems = deploymentProblems({ deployment, version, subdomain, tag, startedMs });
-      if (!problems.length) { console.log(`active: version ${versionId} (tag ${tag}), 100 % of traffic; workers.dev off`); return; }
+      if (!problems.length) { console.log(`active: version ${versionId}, deployed ${deployment.created_on}, 100 % of traffic; workers.dev off`); return; }
       last = problems.join("; ");
     } catch (err) { last = String(err?.message ?? err); }
     await new Promise((r) => setTimeout(r, 10_000));

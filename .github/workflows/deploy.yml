@@ -39,9 +39,8 @@ jobs:
       - name: Deploy
         run: |
           echo "DEPLOY_STARTED_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
-          npx --yes wrangler@4.45.0 deploy --tag "${GITHUB_SHA::12}" --message "commit ${GITHUB_SHA}"
-      # No public URL since 2026-11-09 (workers_dev false): the check reads the Cloudflare API.
+          npx --yes wrangler@4.45.0 deploy
+      # No public URL since 2026-11-09 (workers_dev false): the check reads the Cloudflare API. Wrangler
+      # 4.45's deploy takes no --tag, so this run's deployment is the one created after the step began.
       - name: Deployment check
-        env:
-          COMMIT_TAG: ${{ github.sha }}
-        run: COMMIT_TAG="${COMMIT_TAG::12}" node scripts/check-deployment.mjs
+        run: node scripts/check-deployment.mjs
