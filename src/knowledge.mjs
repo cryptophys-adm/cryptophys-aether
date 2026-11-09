@@ -3,12 +3,15 @@
 // the platform kernel (knowledge.propose, tier 1), and follow each proposal's review (knowledge.status).
 // A person approves an item for shadow testing or rejects it; approved items form the learned pack that
 // xauusd pulls for its shadow arm (phase A7). Nothing here changes a live agent, a prompt or a
-// parameter, and nothing is promoted: promotion is an owner PR in the xauusd repository.
+// parameter, and nothing is promoted: promotion is an owner PR in the xauusd repository. The one
+// exception is the `weighting` family (src/weighting.mjs, owner decision 2026-11-09): approving it
+// activates that H1 quorum weighting in xauusd.
 //
 // Learned is not canon (AGENTS.md rule 5): every item is labelled learned, cites its decision cards and
 // the canon it was measured against, states only measured outcomes or role reminders, and never carries
 // a price, level, size or order wording. The kernel validates every item again before storing it.
 import { CANON } from "./canon.generated.mjs";
+import { latestWeightingReport, weightingCandidate, WEIGHTING_FAMILY } from "./weighting.mjs";
 
 export const ITEM_SCHEMA = "cryptophys.knowledge-item.v1";
 export const PACK_VERSION = "cryptophys.learned-pack.v1";
@@ -303,15 +306,25 @@ export async function runCuration(env, { now = Date.now() } = {}) {
   const cards = await loadCards(db, now, Math.max(ROLE_DRIFT.window_days, CAUTION.window_days, ENGINE.window_days));
   const curatorCandidates = [...roleDriftCandidates(cards, { now }), ...cautionCandidates(cards, { now })];
   const proposedRows = (await db.prepare("SELECT item_json, status FROM knowledge_items WHERE kind = 'param_candidate'").all()).results || [];
-  const proposed = new Set(), pendingFamilies = new Set();
+  const proposed = new Set(), pendingFamilies = new Set(), proposedIds = new Set();
   for (const r of proposedRows) {
     try {
-      const p = JSON.parse(r.item_json).params;
-      proposed.add(`${p.family}:${Object.values(p.values)[0]}`);
+      const it = JSON.parse(r.item_json), p = it.params;
+      proposedIds.add(it.item_id);
+      if (p.family !== WEIGHTING_FAMILY) proposed.add(`${p.family}:${Object.values(p.values)[0]}`);
       if (r.status === "pending") pendingFamilies.add(p.family);
     } catch { /* a malformed row proposes nothing */ }
   }
   const calibratorCandidates = paramCandidates(cards, { now, proposed, pendingFamilies });
+  // The H1 quorum weighting (owner decisions 2026-11-09): the best candidate of xauusd's latest replay
+  // report, one open proposal at a time. Approval activates it in xauusd (src/weighting.mjs there).
+  let weighting = null;
+  try {
+    const latest = await latestWeightingReport(db);
+    const hourly = cards.filter((c) => c.chart === "60" && Date.parse(c.bar_open) >= now - 30 * 86_400_000).map((c) => c.card_id);
+    weighting = weightingCandidate(latest?.report, { cardIds: hourly, pending: pendingFamilies.has(WEIGHTING_FAMILY), proposed: proposedIds, canon: CANON });
+  } catch { weighting = null; }
+  if (weighting) calibratorCandidates.unshift(weighting);
   const curator = await proposeAll(env, CURATOR, curatorCandidates, now);
   const calibrator = await proposeAll(env, CALIBRATOR, calibratorCandidates, now);
   return { status: "ok", cards: cards.length, candidates: { curator: curatorCandidates.length, calibrator: calibratorCandidates.length }, curator, calibrator };
