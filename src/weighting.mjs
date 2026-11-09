@@ -19,6 +19,8 @@ export const WEIGHTING_FAMILY = "weighting";
 /** Mirrors xauusd src/weighting.mjs WEIGHTING_GRID. A change is a reviewed PR in both repositories. */
 export const WEIGHTING_GRID = Object.freeze({
   prior: Object.freeze([5, 10, 20]),
+  regime_prior: Object.freeze([null, 10, 30]),
+  high_vol_quorum_bonus: Object.freeze([0, 0.05, 0.1]),
   weight_range: Object.freeze([Object.freeze([0.25, 2]), Object.freeze([0.5, 1.5]), Object.freeze([0.1, 3])]),
   days: Object.freeze([14, 30, 60]),
   half_life_days: Object.freeze([null, 7, 14]),
@@ -37,12 +39,19 @@ const PARAM_TEXT = Object.freeze({
   days: (v) => `the track record covers ${v} days`,
   half_life_days: (v) => (v == null ? "every call in the window counts the same" : `a call counts half after ${v} days`),
   calibration_beta: (v) => (v ? `confidence calibration counts with strength ${v}` : "confidence calibration does not count"),
-  quorum_share: (v) => `an entry needs more than ${Math.round(v * 100)}% of the weight`
+  quorum_share: (v) => `an entry needs more than ${Math.round(v * 100)}% of the weight`,
+  regime_prior: (v) => (v == null ? "the weight ignores the market regime" : `the weight follows the current regime with shrinkage ${v}`),
+  high_vol_quorum_bonus: (v) => (v ? `high volatility adds ${Math.round(v * 100)} points to the quorum` : "the quorum ignores volatility")
 });
+/** A point of the first release had no regime keys: they take their defaults. */
+const DEFAULTS = Object.freeze({ regime_prior: null, high_vol_quorum_bonus: 0 });
+const complete = (p) => (p && typeof p === "object" && !Array.isArray(p) ? { ...DEFAULTS, ...p } : p);
+export const WEIGHTING_TIMEFRAMES = Object.freeze(["15", "60", "240", "1D"]);
 
 /** Pure: why a grid point may not be proposed (empty when every key is on the reviewed grid). */
-export function pointProblems(params) {
-  if (!isObject(params)) return ["not_an_object"];
+export function pointProblems(raw) {
+  if (!isObject(raw)) return ["not_an_object"];
+  const params = complete(raw);
   const out = [];
   for (const k of Object.keys(params)) if (!KEYS.includes(k)) out.push(`unknown_key:${k}`);
   for (const k of KEYS) if (!(k in params) || !WEIGHTING_GRID[k].some((v) => same(v, params[k]))) out.push(`off_grid:${k}`);
@@ -60,7 +69,8 @@ export function reportProblems(report) {
   if (!isObject(report)) return ["not_an_object"];
   const out = [];
   if (report.version !== WEIGHTING_REPORT_VERSION) out.push("unsupported_version");
-  if (!isObject(report.active) || pointProblems(report.active.params).length) out.push("active_invalid");
+  if (!isObject(report.active) || pointProblems(complete(report.active.params)).length) out.push("active_invalid");
+  if (report.timeframe !== undefined && !WEIGHTING_TIMEFRAMES.includes(report.timeframe)) out.push("timeframe_invalid");
   if (!Array.isArray(report.candidates) || report.candidates.length > 30) out.push("candidates_invalid");
   if (!Array.isArray(report.agents) || report.agents.length > 40) out.push("agents_invalid");
   for (const k of forbidden(report)) out.push(`forbidden_key:${k}`);
@@ -71,6 +81,14 @@ export function reportProblems(report) {
 export const WEIGHTING_SCHEMA_SQL = Object.freeze([
   `CREATE TABLE IF NOT EXISTS weighting_reports (
     id INTEGER PRIMARY KEY CHECK (id = 1),
+    report_json TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    received_at TEXT NOT NULL
+  )`,
+  // Owner decisions 2026-11-09 (xauusd): one weighting per timeframe, tuned automatically; Aether keeps
+  // the latest report of each timeframe as an audit.
+  `CREATE TABLE IF NOT EXISTS weighting_reports_tf (
+    timeframe TEXT PRIMARY KEY,
     report_json TEXT NOT NULL,
     generated_at TEXT NOT NULL,
     received_at TEXT NOT NULL
@@ -90,17 +108,25 @@ export async function storeWeightingReport(db, report, { now = Date.now() } = {}
   if (problems.length) return { accepted: false, reason: problems.slice(0, 5).join(", ") };
   await ensureSchema(db);
   const at = new Date(now).toISOString();
-  await db.prepare("INSERT INTO weighting_reports (id, report_json, generated_at, received_at) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET report_json = excluded.report_json, generated_at = excluded.generated_at, received_at = excluded.received_at")
-    .bind(JSON.stringify(report), String(report.generated_at ?? at), at).run();
+  await db.prepare("INSERT INTO weighting_reports_tf (timeframe, report_json, generated_at, received_at) VALUES (?, ?, ?, ?) ON CONFLICT(timeframe) DO UPDATE SET report_json = excluded.report_json, generated_at = excluded.generated_at, received_at = excluded.received_at")
+    .bind(report.timeframe ?? "60", JSON.stringify(report), String(report.generated_at ?? at), at).run();
   return { accepted: true };
 }
 
-/** The latest stored report, or null. */
-export async function latestWeightingReport(db) {
+/** The latest stored report of a timeframe (the 1H one by default), or null. */
+export async function latestWeightingReport(db, timeframe = "60") {
   await ensureSchema(db);
-  const row = await db.prepare("SELECT report_json, received_at FROM weighting_reports WHERE id = 1").first();
+  let row = await db.prepare("SELECT report_json, received_at FROM weighting_reports_tf WHERE timeframe = ?").bind(timeframe).first();
+  if (!row && timeframe === "60") row = await db.prepare("SELECT report_json, received_at FROM weighting_reports WHERE id = 1").first();
   if (!row) return null;
   try { return { report: JSON.parse(row.report_json), received_at: row.received_at }; } catch { return null; }
+}
+
+/** The latest report of every timeframe (for /health). */
+export async function weightingReports(db) {
+  await ensureSchema(db);
+  const rows = (await db.prepare("SELECT timeframe, report_json, received_at FROM weighting_reports_tf ORDER BY timeframe").all()).results || [];
+  return rows.map((r) => { try { return { timeframe: r.timeframe, report: JSON.parse(r.report_json), received_at: r.received_at }; } catch { return null; } }).filter(Boolean);
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -113,6 +139,9 @@ const pct = (x) => Math.round(x * 100);
  * `proposed` holds item ids already proposed. `cardIds` are the hourly decision cards it cites.
  */
 export function weightingCandidate(report, { cardIds = [], pending = false, proposed = new Set(), canon } = {}) {
+  // Owner decisions 2026-11-09: xauusd tunes and activates the weighting itself ("mode": "auto");
+  // Aether audits the reports and proposes nothing.
+  if (report?.mode === "auto") return null;
   if (pending || !report || cardIds.length < 10) return null;
   const ok = (report.candidates || []).filter((c) => String(c.verdict).startsWith("better_than_active") && c.holdout?.complete === true && !pointProblems(c.params).length && Number.isFinite(c.discovery?.accuracy) && Number.isFinite(c.discovery?.control_accuracy));
   ok.sort((a, b) => (a.discovery.p_holm ?? 1) - (b.discovery.p_holm ?? 1) || (b.discovery.accuracy - b.discovery.control_accuracy) - (a.discovery.accuracy - a.discovery.control_accuracy));
@@ -138,7 +167,7 @@ export function weightingCandidate(report, { cardIds = [], pending = false, prop
       },
       provenance: { card_ids: cardIds.slice(-40), canon_sha: canon.content_sha256, canon_version: canon.version, source: "aether" },
       params: {
-        family: WEIGHTING_FAMILY, grid: `WEIGHTING_GRID.${c.changed}`, values: c.params,
+        family: WEIGHTING_FAMILY, grid: `WEIGHTING_GRID.${c.changed}`, values: complete(c.params),
         hypothesis: "the replayed hourly quorum is right more often than with the active weighting, on discovery and on the holdout",
         metric: "paired sign test on decisive pairs, one-sided, alpha 0.05 (Holm-adjusted), 100-room holdout; approval activates; reverse shadow rollback"
       }

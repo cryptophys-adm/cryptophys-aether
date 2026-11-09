@@ -17,7 +17,7 @@ import { syncCanon, embedPendingCards, indexStatus } from "./indexes.mjs";
 import { runDigest } from "./guardian.mjs";
 import { budgetUsed } from "./budget.mjs";
 import { runCuration, syncReviews, learnedPack, knowledgeCounts } from "./knowledge.mjs";
-import { storeWeightingReport, latestWeightingReport } from "./weighting.mjs";
+import { storeWeightingReport, weightingReports } from "./weighting.mjs";
 
 const json = (body, status = 200) => new Response(JSON.stringify(body, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const canonInfo = () => ({ version: CANON.version, content_sha256: CANON.content_sha256, files: CANON.files, kb_version: CANON.indicator.kb_version, kb_content_sha256: CANON.indicator.kb_content_sha256 });
@@ -44,8 +44,8 @@ export default {
       try { knowledge = env.AETHER_DB ? await knowledgeCounts(env.AETHER_DB) : null; } catch { knowledge = { error: "unavailable" }; }
       let weighting = null;
       try {
-        const w = env.AETHER_DB ? await latestWeightingReport(env.AETHER_DB) : null;
-        weighting = w ? { received_at: w.received_at, active: w.report.active?.id ?? null, rooms: w.report.rooms ?? 0, better: (w.report.candidates || []).filter((c) => String(c.verdict).startsWith("better_than_active")).map((c) => c.id) } : null;
+        const all = env.AETHER_DB ? await weightingReports(env.AETHER_DB) : [];
+        weighting = all.length ? Object.fromEntries(all.map((w) => [w.timeframe, { received_at: w.received_at, mode: w.report.mode ?? null, active: w.report.active?.id ?? null, rooms: w.report.rooms ?? 0, regimes: w.report.regimes ?? null, better: (w.report.candidates || []).filter((c) => String(c.verdict).startsWith("better_than_active")).map((c) => c.id), last_change: (w.report.history || []).filter((h) => h.kind === "activated" || h.kind === "rolled_back").at(-1) ?? null }])) : null;
       } catch { weighting = { error: "unavailable" }; }
       return json({ service: "cryptophys-aether", status: "ok", phase: env.AETHER_PHASE ?? "A6", canon: { version: CANON.version, content_sha256: CANON.content_sha256 }, cards, indexes, ai, knowledge, weighting });
     }

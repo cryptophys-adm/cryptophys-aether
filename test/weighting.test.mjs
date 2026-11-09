@@ -26,7 +26,7 @@ function d1() {
 
 const NOW = Date.parse("2026-12-10T12:00:00Z");
 const H = 3_600_000;
-const DEFAULT = { prior: 10, weight_range: [0.25, 2], days: 30, half_life_days: null, calibration_beta: 0, quorum_share: 0.5 };
+const DEFAULT = { prior: 10, weight_range: [0.25, 2], days: 30, half_life_days: null, calibration_beta: 0, quorum_share: 0.5, regime_prior: null, high_vol_quorum_bonus: 0 };
 const candidate = (changed, value, verdict, extra = {}) => ({
   id: `weighting@${changed}${value}`, changed, change: "x", params: { ...DEFAULT, [changed]: value }, verdict,
   discovery: { bars: 220, accuracy: 0.62, control_accuracy: 0.54, p_value: 0.004, p_holm: 0.03 }, holdout: { bars: 100, complete: true, accuracy: 0.6, control_accuracy: 0.55 }, ...extra
@@ -135,4 +135,14 @@ test("runCuration proposes the weighting point once; once approved it is in the 
   const it = pack.items.find((x) => x.item_id === "k-weighting-quorum-share-0-6");
   assert.equal(it.params.family, "weighting");
   assert.deepEqual(it.params.values, { ...DEFAULT, quorum_share: 0.6 });
+});
+
+test("auto mode (owner decisions 2026-11-09): reports are kept per timeframe as an audit; the calibrator proposes nothing", async () => {
+  const db = d1();
+  const auto = (tf) => ({ ...report([candidate("quorum_share", 0.6, "better_than_active: activated automatically")]), mode: "auto", timeframe: tf, active: { id: "w", params: { prior: 10, weight_range: [0.25, 2], days: 30, half_life_days: null, calibration_beta: 0, quorum_share: 0.5, regime_prior: 10, high_vol_quorum_bonus: 0.05 } } });
+  assert.equal((await storeWeightingReport(db, auto("240"), { now: NOW })).accepted, true, "regime keys on the reviewed grid");
+  assert.equal((await storeWeightingReport(db, auto("60"), { now: NOW })).accepted, true);
+  assert.equal((await storeWeightingReport(db, { ...auto("5"), timeframe: "5" })).accepted, false, "an unknown timeframe is refused");
+  assert.equal((await latestWeightingReport(db, "240")).report.timeframe, "240");
+  assert.equal(weightingCandidate(auto("60"), { cardIds: Array.from({ length: 12 }, (_, i) => `d:60:${NOW - i * H}:0`), canon: CANON }), null, "xauusd activates by itself");
 });
