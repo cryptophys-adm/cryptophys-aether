@@ -1,6 +1,8 @@
 // cryptophys-aether: the Knowledge Guardian cluster (RFC_AETHER_KNOWLEDGE_GUARDIAN, phases A2 to A6).
 //   GET /health   status, the canon version and hash, and card counts (no card content)
 //   GET /canon    the canon's version, file hashes and the doctrine (public reference)
+//   RPC AetherReader (Service Binding from the Nexus Worker): overview, read-only, for the Aether page
+//     at nexus.cryptophys.work/aether (src/reader.mjs)
 //   RPC KnowledgeIngress (Service Binding from the xauusd AI Worker, phase A5): ingestCards, canonInfo,
 //     learnedPack (phase A6: the items a person approved for shadow testing; never a live prompt; a
 //     weighting item activates the H1 quorum weighting in xauusd, owner decision 2026-11-09),
@@ -18,6 +20,7 @@ import { runDigest } from "./guardian.mjs";
 import { budgetUsed } from "./budget.mjs";
 import { runCuration, syncReviews, learnedPack, knowledgeCounts } from "./knowledge.mjs";
 import { storeWeightingReport, weightingReports } from "./weighting.mjs";
+import { aetherOverview } from "./reader.mjs";
 
 const json = (body, status = 200) => new Response(JSON.stringify(body, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const canonInfo = () => ({ version: CANON.version, content_sha256: CANON.content_sha256, files: CANON.files, kb_version: CANON.indicator.kb_version, kb_content_sha256: CANON.indicator.kb_content_sha256 });
@@ -30,6 +33,16 @@ export class KnowledgeIngress extends WorkerEntrypoint {
   async learnedPack() { return learnedPack(this.env); }
   /** xauusd's H1 quorum weighting report (cryptophys.weighting-report.v1), hourly; the latest is kept. */
   async ingestWeightingReport(report) { return storeWeightingReport(this.env.AETHER_DB, report); }
+}
+
+/**
+ * Read-only view for the Aether page in Nexus (nexus.cryptophys.work/aether, owner 2026-11-09): the
+ * canon, the cards and their ingest, the indexes, the AI budget, the knowledge proposals, the
+ * guardian's compliance findings and the weighting reports per timeframe (src/reader.mjs). The Nexus
+ * Worker is the only caller, over a Service Binding; nothing here writes or carries a price.
+ */
+export class AetherReader extends WorkerEntrypoint {
+  async overview() { return aetherOverview(this.env); }
 }
 
 export default {

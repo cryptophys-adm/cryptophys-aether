@@ -32,6 +32,7 @@ The canon changes only by a reviewed PR. It has four parts:
 
 - `GET /health`: status, the canon version and hash, card counts, index status, and AI budget use. It never returns card content.
 - `GET /canon`: the canon's version, its file hashes and the doctrine.
+- `RPC AetherReader`, reached through a Service Binding from the Nexus Worker: `overview()` for the Aether page at `nexus.cryptophys.work/aether` (owner 2026-11-09; behind the same Cloudflare Access sign-in as Nexus). It is read-only and returns the canon and its doctrine, card counts and the ingest log, the index status, the AI budget, the knowledge proposals, the guardian's compliance findings of the last 24 hours, and each timeframe's weighting report (`src/reader.mjs`). It never returns a price.
 - `RPC KnowledgeIngress`, reached through a Service Binding from the xauusd AI Worker in phase A5:
   - `ingestCards(cards)`: stores `cryptophys.decision-card.v1` cards, at most 50 per call. Any card carrying a level or a price is refused.
   - `canonInfo()`: the canon's version and hashes.
