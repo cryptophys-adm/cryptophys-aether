@@ -20,7 +20,7 @@ import { runDigest } from "./guardian.mjs";
 import { budgetUsed } from "./budget.mjs";
 import { runCuration, syncReviews, learnedPack, knowledgeCounts } from "./knowledge.mjs";
 import { storeWeightingReport, weightingReports } from "./weighting.mjs";
-import { aetherOverview } from "./reader.mjs";
+import { aetherOverview, aetherSync } from "./reader.mjs";
 
 const json = (body, status = 200) => new Response(JSON.stringify(body, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const canonInfo = () => ({ version: CANON.version, content_sha256: CANON.content_sha256, files: CANON.files, kb_version: CANON.indicator.kb_version, kb_content_sha256: CANON.indicator.kb_content_sha256 });
@@ -43,6 +43,8 @@ export class KnowledgeIngress extends WorkerEntrypoint {
  */
 export class AetherReader extends WorkerEntrypoint {
   async overview() { return aetherOverview(this.env); }
+  /** The end-to-end sync checks only (cheap): read by the xauusd AI Worker's health alerts every 15 minutes. */
+  async sync() { return aetherSync(this.env); }
 }
 
 export default {
