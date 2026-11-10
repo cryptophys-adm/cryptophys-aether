@@ -351,3 +351,95 @@ export async function knowledgeCounts(db) {
   const rows = (await db.prepare("SELECT status, COUNT(*) AS n FROM knowledge_items GROUP BY status").all()).results || [];
   return Object.fromEntries(rows.map((r) => [r.status, Number(r.n) || 0]));
 }
+
+// ---------------------------------------------------------------- curation progress (read-only, for the console)
+
+const round1 = (x) => Math.round(x * 10) / 10;
+
+/**
+ * Pure: how far each curator and calibrator rule is from its threshold, measured on the same cards
+ * runCuration reads. `ready` is true exactly when the rule itself would draft that item today (the
+ * rule functions decide, so the progress can never disagree with them). Nothing here proposes.
+ */
+export function curationProgress(cards, { now = Date.now() } = {}) {
+  const day = 86_400_000;
+  // Role drift: rooms each agent spoke in, and its most broken check, over the last 7 days.
+  const rdRecent = cards.filter((c) => Date.parse(c.bar_open) >= now - ROLE_DRIFT.window_days * day);
+  const opens = rdRecent.map((c) => Date.parse(c.bar_open));
+  const span = opens.length ? round1((Math.max(...opens) - Math.min(...opens)) / day) : 0;
+  const rooms = new Map(), broke = new Map();
+  for (const c of rdRecent) {
+    for (const a of c.agents || []) rooms.set(a.id, (rooms.get(a.id) || 0) + 1);
+    const seen = new Set();
+    for (const v of c.compliance || []) {
+      const k = `${v.agent}|${v.check}`;
+      if (seen.has(k) || !CHECK_PHRASE[v.check]) continue;
+      seen.add(k);
+      broke.set(k, (broke.get(k) || 0) + 1);
+    }
+  }
+  const rdReady = new Set(roleDriftCandidates(cards, { now }).map((i) => `${i.evidence.agent}|${i.evidence.check}`));
+  const rdAgents = [...rooms].map(([agent, n]) => {
+    let check = null, withBreak = 0;
+    for (const [k, b] of broke) { const [a, ch] = k.split("|"); if (a === agent && b > withBreak) { check = ch; withBreak = b; } }
+    return { agent, rooms: n, check, rooms_with_break: withBreak, rate_pct: n ? pct(withBreak / n) : 0, ready: check !== null && rdReady.has(`${agent}|${check}`) };
+  }).sort((a, b) => Number(b.ready) - Number(a.ready) || b.rooms_with_break - a.rooms_with_break || b.rooms - a.rooms);
+
+  // Agent pattern (caution): decisive outcomes per agent, chart and session over the last 30 days.
+  const caRecent = cards.filter((c) => Date.parse(c.bar_open) >= now - CAUTION.window_days * day);
+  const all = new Map(), by = new Map();
+  for (const c of caRecent) {
+    for (const [subject, o] of Object.entries(c.outcomes || {})) {
+      if (!subject.startsWith("agent:") || (o?.result !== "hit" && o?.result !== "miss")) continue;
+      const agent = subject.slice(6), miss = o.result === "miss" ? 1 : 0;
+      const a = all.get(agent) || { n: 0, miss: 0 };
+      all.set(agent, { n: a.n + 1, miss: a.miss + miss });
+      const k = `${agent}|${c.chart}|${c.session}`;
+      const s = by.get(k) || { n: 0, miss: 0 };
+      by.set(k, { n: s.n + 1, miss: s.miss + miss });
+    }
+  }
+  const caReady = new Set(cautionCandidates(cards, { now }).map((i) => `${i.evidence.agent}|${i.evidence.chart}|${i.evidence.session}`));
+  const situations = [...by].map(([k, s]) => {
+    const [agent, chart, session] = k.split("|");
+    const base = all.get(agent);
+    const others = base.n - s.n;
+    return { agent, chart, session, decisive: s.n, wrong_pct: pct(s.miss / s.n), baseline_decisive: others, baseline_wrong_pct: others > 0 ? pct((base.miss - s.miss) / others) : null, ready: caReady.has(k) };
+  }).sort((a, b) => Number(b.ready) - Number(a.ready) || b.decisive - a.decisive);
+  const decisive = [...all.values()].reduce((n, a) => n + a.n, 0);
+
+  // Engine pattern: stuck structure episodes per tuning family in the hourly cards.
+  const episodes = stuckEpisodes(cards, { now });
+  const engine = Object.entries(TUNING_GRID).map(([family, grid]) => {
+    const e = episodes[family];
+    return { family, name: grid.name, episodes: e.episodes, cards: e.card_ids.length, longest_candles: e.longest_candles, next_value: grid.values.find((v) => !grid.tested.includes(v)) ?? null, ready: e.episodes >= ENGINE.min_episodes && e.card_ids.length >= ENGINE.min_cards };
+  });
+
+  return {
+    version: "cryptophys.aether-curation-progress.v1",
+    schedule_utc: "daily 02:52",
+    cards: cards.length,
+    role_drift: {
+      window_days: ROLE_DRIFT.window_days, cards: rdRecent.length, span_days: span,
+      need: { span_days: ROLE_DRIFT.min_span_days, rooms: ROLE_DRIFT.min_rooms, rooms_with_break: ROLE_DRIFT.min_rooms_with_break, rate_pct_above: ROLE_DRIFT.min_rate_pct },
+      ready: rdAgents.filter((a) => a.ready).length, agents: rdAgents.slice(0, 16)
+    },
+    caution: {
+      window_days: CAUTION.window_days, decisive_outcomes: decisive,
+      need: { decisive: CAUTION.min_decisive, baseline_decisive: CAUTION.min_decisive, alpha: CAUTION.alpha },
+      ready: situations.filter((s) => s.ready).length, situations: situations.slice(0, 16)
+    },
+    engine: {
+      window_days: ENGINE.window_days,
+      need: { episodes: ENGINE.min_episodes, cards: ENGINE.min_cards },
+      ready: engine.filter((e) => e.ready).length, families: engine
+    }
+  };
+}
+
+/** The progress from D1 (the cards of the longest window). Never throws: null when unreadable. */
+export async function curationProgressOf(db, { now = Date.now() } = {}) {
+  try {
+    return curationProgress(await loadCards(db, now, Math.max(ROLE_DRIFT.window_days, CAUTION.window_days, ENGINE.window_days)), { now });
+  } catch { return null; }
+}
