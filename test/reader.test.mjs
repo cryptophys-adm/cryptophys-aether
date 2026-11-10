@@ -118,3 +118,34 @@ test("aetherSync reads D1 and never throws; the overview carries it", async () =
   assert.equal((await aetherSync({}, { now: NOW })).checks.ingest.status, "warn", "no database: the check says so");
   assert.ok((await aetherOverview({ AETHER_DB: db }, { now: NOW })).sync.checks);
 });
+
+test("the overview carries the existing knowledge and the learning progress", async () => {
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests(); resetWeightingSchemaCacheForTests();
+  const db = d1();
+  await ingestCards(db, [0, 1, 2].map((i) => card(i)), { now: NOW });
+  const o = await aetherOverview({ AETHER_DB: db }, { now: NOW });
+  assert.deepEqual(o.canon.file_list.map((f) => f.path), CANON.files.map((f) => f.path));
+  assert.equal(o.canon.roles.length, CANON.roles.agents.length);
+  assert.equal(o.canon.kb.version, CANON.indicator.kb.version);
+  assert.ok(o.canon.kb.input_lanes.includes("tradingview_webhook"));
+  assert.equal(o.progress.curation.cards, 3);
+  assert.equal(o.progress.curation.role_drift.agents[0].rooms, 3);
+  assert.deepEqual(o.progress.weighting, []);
+  assert.equal((await aetherOverview({}, { now: NOW })).progress.curation, null, "no database: no progress, still an answer");
+});
+
+test("weighting progress: the most-paired candidate's discovery and holdout against their minimums", async () => {
+  const { weightingProgress, WEIGHTING_DISCOVERY_MIN } = await import("../src/reader.mjs");
+  const p = weightingProgress("60", {
+    mode: "auto", rooms: 59, window_days: 30, active: { id: "weighting@default" },
+    candidates: [
+      { id: "a", verdict: "collecting", discovery: { bars: 0 }, holdout: { bars: 40, required_bars: 100, complete: false } },
+      { id: "b", verdict: "collecting", discovery: { bars: 0 }, holdout: { bars: 59, required_bars: 100, complete: false } }
+    ]
+  }, "2026-11-09T11:00:00Z");
+  assert.deepEqual(p.discovery, { have: 0, need: WEIGHTING_DISCOVERY_MIN });
+  assert.deepEqual(p.holdout, { have: 59, need: 100, complete: false });
+  assert.deepEqual(p.verdicts, { collecting: 2 });
+  assert.equal(p.rooms, 59);
+  assert.equal(weightingProgress("15", null).discovery, null);
+});

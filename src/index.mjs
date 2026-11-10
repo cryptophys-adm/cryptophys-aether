@@ -1,6 +1,7 @@
 // cryptophys-aether: the Knowledge Guardian cluster (RFC_AETHER_KNOWLEDGE_GUARDIAN, phases A2 to A6).
 //   GET /health   status, the canon version and hash, and card counts (no card content)
 //   GET /canon    the canon's version, file hashes and the doctrine (public reference)
+//   GET /v1/overview  the AetherReader overview over HTTP, for the Cerebrum Console (Service Binding only)
 //   RPC AetherReader (Service Binding from the Nexus Worker): overview, read-only, for the Aether page
 //     at nexus.cryptophys.work/aether (src/reader.mjs)
 //   RPC KnowledgeIngress (Service Binding from the xauusd AI Worker, phase A5): ingestCards, canonInfo,
@@ -65,7 +66,10 @@ export default {
       return json({ service: "cryptophys-aether", status: "ok", phase: env.AETHER_PHASE ?? "A6", canon: { version: CANON.version, content_sha256: CANON.content_sha256 }, cards, indexes, ai, knowledge, weighting });
     }
     if (url.pathname === "/canon") return json({ ...canonInfo(), doctrine: CANON.doctrine.rules });
-    return json({ error: "not_found", endpoints: ["GET /health", "GET /canon", "RPC KnowledgeIngress"] }, 404);
+    // The same read-only overview as AetherReader.overview(), for the Cerebrum Console's Knowledge page
+    // (owner 2026-11-10). workers_dev is off and there is no route, so only a Service Binding reaches it.
+    if (url.pathname === "/v1/overview") return json(await aetherOverview(env));
+    return json({ error: "not_found", endpoints: ["GET /health", "GET /canon", "GET /v1/overview", "RPC KnowledgeIngress", "RPC AetherReader"] }, 404);
   },
 
   /** Hourly at :52. Every step is non-fatal and bounded by the AI budget. */

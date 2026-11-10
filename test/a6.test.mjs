@@ -178,3 +178,42 @@ test("without the kernel binding nothing is proposed and nothing throws", async 
   assert.equal(r.curator.stopped, "unavailable");
   assert.deepEqual(await syncReviews({ AETHER_DB: db }, { now: NOW }), { status: "ok", approved: 0, rejected: 0, expired: 0 });
 });
+
+test("curation progress: each rule's have-versus-need, and ready exactly when the rule itself drafts the item", async () => {
+  const { curationProgress, ROLE_DRIFT, CAUTION, ENGINE } = await import("../src/knowledge.mjs");
+  // Three days of cards: role drift is short of its 6-day span, so nothing is ready yet.
+  const young = curationProgress(hourly(3, (i) => (i % 8 === 0 ? { compliance: [{ agent: "r37_funnel", check: "calibration_talk" }] } : {})), { now: NOW });
+  assert.equal(young.version, "cryptophys.aether-curation-progress.v1");
+  assert.equal(young.role_drift.need.span_days, ROLE_DRIFT.min_span_days);
+  assert.ok(young.role_drift.span_days < ROLE_DRIFT.min_span_days);
+  const funnel = young.role_drift.agents.find((a) => a.agent === "r37_funnel");
+  assert.deepEqual([funnel.rooms, funnel.check, funnel.rooms_with_break, funnel.ready], [72, "calibration_talk", 9, false]);
+  assert.equal(young.role_drift.ready, 0);
+  assert.equal(young.caution.need.decisive, CAUTION.min_decisive);
+  assert.deepEqual(young.engine.need, { episodes: ENGINE.min_episodes, cards: ENGINE.min_cards });
+
+  // Seven days with the same breaks: the rule drafts the item, and the progress says ready.
+  const week = hourly(7, (i) => (i % 8 === 0 ? { compliance: [{ agent: "r37_funnel", check: "calibration_talk" }] } : {}));
+  const p = curationProgress(week, { now: NOW });
+  assert.equal(p.role_drift.ready, roleDriftCandidates(week, { now: NOW }).length);
+  assert.equal(p.role_drift.agents[0].agent, "r37_funnel");
+  assert.equal(p.role_drift.agents[0].ready, true);
+
+  // Caution: the London pattern is ready; the counts are the measured decisive outcomes.
+  const month = hourly(30, (i, ms) => ({ outcomes: { "agent:prophet": { result: sessionOf(ms) === "london" ? (i % 3 === 0 ? "hit" : "miss") : (i % 10 === 0 ? "miss" : "hit") } } }));
+  const c = curationProgress(month, { now: NOW }).caution;
+  assert.equal(c.ready, cautionCandidates(month, { now: NOW }).length);
+  assert.equal(c.situations[0].session, "london");
+  assert.equal(c.situations[0].ready, true);
+  assert.equal(c.decisive_outcomes, 30 * 24);
+
+  // Engine: the stuck episodes per tuning family, with the next untested grid value.
+  const stuck = hourly(30, (i) => ((i % 100) < 12 ? { stuck_open: [{ field: "gmi_v12_70.verdict", candles: 9 }] } : {}));
+  const e = curationProgress(stuck, { now: NOW }).engine;
+  const gmi = e.families.find((f) => f.family === "gmi_v12_70");
+  assert.equal(gmi.episodes, stuckEpisodes(stuck, { now: NOW }).gmi_v12_70.episodes);
+  assert.equal(gmi.next_value, 16);
+  assert.equal(gmi.ready, true);
+  assert.equal(e.families.find((f) => f.family === "prophet_r37").ready, false);
+  assert.doesNotMatch(JSON.stringify(p), /entry_price|stop_loss|take_profit/);
+});

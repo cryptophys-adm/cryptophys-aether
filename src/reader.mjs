@@ -7,7 +7,7 @@ import { CANON } from "./canon.generated.mjs";
 import { cardCounts } from "./store.mjs";
 import { indexStatus } from "./indexes.mjs";
 import { budgetUsed } from "./budget.mjs";
-import { knowledgeCounts } from "./knowledge.mjs";
+import { knowledgeCounts, curationProgressOf } from "./knowledge.mjs";
 import { weightingReports } from "./weighting.mjs";
 import { complianceFindings, COMPLIANCE_WARN_PER_100 } from "./guardian.mjs";
 
@@ -15,13 +15,41 @@ const DAY_MS = 86_400_000;
 const safe = async (fn, fallback = null) => { try { return await fn(); } catch { return fallback; } };
 const parse = (s) => { try { return JSON.parse(s); } catch { return null; } };
 
+/**
+ * The discovery minimum of the xauusd weighting replay (SHADOW_MIN_SAMPLE in its src/shadow-versions.mjs):
+ * a candidate is judged only once its discovery slice has this many paired rooms. The report carries
+ * the holdout size itself (holdout.required_bars); this one is mirrored here, so a change there is a PR.
+ */
+export const WEIGHTING_DISCOVERY_MIN = 200;
+
+/**
+ * Pure: how close each timeframe's auto-tuning is to judging a candidate, from its latest report: the
+ * candidate with the most paired rooms, its discovery and holdout slices against their minimums, and
+ * the rooms on the active weighting (the rollback check needs 100).
+ */
+export function weightingProgress(timeframe, report, receivedAt) {
+  const r = report || {};
+  const cands = r.candidates || [];
+  const paired = (c) => Number(c.discovery?.bars ?? 0) + Number(c.holdout?.bars ?? 0);
+  const best = [...cands].sort((a, b) => paired(b) - paired(a))[0] || null;
+  const verdicts = {};
+  for (const c of cands) { const v = String(c.verdict ?? "unknown").split(":")[0]; verdicts[v] = (verdicts[v] || 0) + 1; }
+  return {
+    timeframe, received_at: receivedAt ?? null, mode: r.mode ?? null, rooms: r.rooms ?? 0, window_days: r.window_days ?? null,
+    active: r.active?.id ?? null, candidates: cands.length, verdicts,
+    discovery: best ? { have: best.discovery?.bars ?? 0, need: WEIGHTING_DISCOVERY_MIN } : null,
+    holdout: best ? { have: best.holdout?.bars ?? 0, need: best.holdout?.required_bars ?? null, complete: Boolean(best.holdout?.complete) } : null,
+    reverse: r.reverse ? { rooms: r.reverse.rooms ?? 0, need: 100 } : null
+  };
+}
+
 /** Pure: a weighting report reduced to what the page shows. */
 export function weightingSummary(timeframe, report, receivedAt) {
   const r = report || {};
   const candidates = (r.candidates || []).map((c) => ({
     id: c.id, changed: c.changed ?? null, change: c.change ?? null, verdict: c.verdict ?? null,
     discovery: c.discovery ? { bars: c.discovery.bars ?? null, accuracy: c.discovery.accuracy ?? null, control_accuracy: c.discovery.control_accuracy ?? null, p_holm: c.discovery.p_holm ?? null } : null,
-    holdout: c.holdout ? { bars: c.holdout.bars ?? null, complete: Boolean(c.holdout.complete), accuracy: c.holdout.accuracy ?? null, control_accuracy: c.holdout.control_accuracy ?? null } : null
+    holdout: c.holdout ? { bars: c.holdout.bars ?? null, required_bars: c.holdout.required_bars ?? null, complete: Boolean(c.holdout.complete), accuracy: c.holdout.accuracy ?? null, control_accuracy: c.holdout.control_accuracy ?? null } : null
   }));
   const rank = (v) => (String(v).startsWith("better_than_active") ? 0 : String(v).startsWith("running") ? 1 : 2);
   candidates.sort((a, b) => rank(a.verdict) - rank(b.verdict) || (a.discovery?.p_holm ?? 1) - (b.discovery?.p_holm ?? 1));
@@ -117,12 +145,18 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
     const it = parse(r.item_json) || {};
     return { item_id: r.item_id, version: r.version, kind: r.kind, agent: r.agent_id, status: r.status, text: it.text ?? null, situation: it.situation ?? null, params: it.params ?? null, evidence: it.evidence ?? null, detail: parse(r.detail) ?? r.detail ?? null, created_at: r.created_at, updated_at: r.updated_at };
   }), []) : [];
-  const weighting = db ? await safe(async () => (await weightingReports(db)).map((w) => weightingSummary(w.timeframe, w.report, w.received_at)), []) : [];
+  const reports = db ? await safe(() => weightingReports(db), []) : [];
+  const weighting = reports.map((w) => weightingSummary(w.timeframe, w.report, w.received_at));
+  const roles = CANON.roles?.agents || [];
   return {
     service: "cryptophys-aether", phase: env.AETHER_PHASE ?? null, generated_at: new Date(now).toISOString(),
     canon: {
       version: CANON.version, content_sha256: CANON.content_sha256, files: Object.keys(CANON.files || {}).length,
       kb_version: CANON.indicator?.kb_version ?? null, kb_content_sha256: CANON.indicator?.kb_content_sha256 ?? null,
+      file_list: (CANON.files || []).map((f) => ({ path: f.path, sha256: f.sha256 })),
+      kb: CANON.indicator?.kb ? { version: CANON.indicator.kb.version ?? null, status: CANON.indicator.kb.status ?? null, sections: Object.keys(CANON.indicator.kb).filter((k) => !["version", "status", "purpose"].includes(k)), input_lanes: Object.keys(CANON.indicator.kb.input_lanes || {}) } : null,
+      roles: roles.map((a) => ({ id: a.id, name: a.name ?? null, kind: a.kind ?? null, family: a.family ?? null })),
+      definitions: Object.keys(CANON.definitions || {}).filter((k) => !["version", "note"].includes(k)),
       doctrine: (CANON.doctrine?.rules || []).map((r) => ({ id: r.id, rule: r.rule, since: r.since ?? null, status: r.status ?? null }))
     },
     cards, ingest: { last_24h: ingest24, recent: ingest },
@@ -131,6 +165,10 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
     knowledge: { counts: db ? await safe(() => knowledgeCounts(db), {}) : {}, items: knowledgeItems },
     guardian: { window_hours: 24, cards: lastDay.length, threshold_per_100: COMPLIANCE_WARN_PER_100, findings: complianceFindings(lastDay).slice(0, 30) },
     weighting,
+    progress: {
+      curation: db ? await curationProgressOf(db, { now }) : null,
+      weighting: reports.map((w) => weightingProgress(w.timeframe, w.report, w.received_at))
+    },
     sync: await aetherSync(env, { now })
   };
 }
