@@ -10,6 +10,7 @@
     "test": "node --test",
     "canon:build": "node scripts/build-canon.mjs --write",
     "canon:check": "node scripts/build-canon.mjs --check",
+    "canon:sync": "node scripts/sync-canon-kb.mjs",
     "ensure:vectorize": "node scripts/ensure-vectorize.mjs"
   }
 }
