@@ -33,6 +33,9 @@
   "triggers": { "crons": ["52 * * * *"] },
   "vars": {
     "AETHER_PHASE": "A6",
-    "AI_DAILY_LIMIT": "60"
+    "AI_DAILY_LIMIT": "60",
+    // Owner 2026-11-11: the Knowledge Council's daily session ("propose" sends amendments to Cerebrum;
+    // "observe" records the review only; "off" skips it).
+    "KNOWLEDGE_COUNCIL": "propose"
   }
 }

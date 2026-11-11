@@ -1,21 +1,391 @@
 {
-  "version": "aether.canon.doctrine.v1",
-  "note": "The owner's rules in force for the XAUUSD advisory system, each with its source. Changed only by a reviewed PR in this repository.",
+  "version": "aether.canon.doctrine.v2",
+  "note": "The owner's rules in force for the XAUUSD system, each with its source. Constitutional rules change only by a reviewed PR or an owner-approved amendment; operational rules follow the measured system through the Knowledge Council and Cerebrum (doctrine_protocol). Retired rules are kept for history and are never indexed.",
+  "audited": "2026-11-11",
   "rules": [
-    {"id": "advisory_only", "rule": "The server never trades: no broker integration, no broker credential, no order and no position size in the Workers. Since 2026-11-09 the owner's own MetaTrader 5 Expert Advisor may execute the H1 decision on the owner's terminal, sizing each trade from the owner's risk input, and Omega may pause or stop it. Aether, its reports and its learned knowledge stay advisory.", "source": "xauusd AGENTS.md rule 8; owner decisions 2026-11-09 (Langsung siap live, EA MT5 di terminal Anda)", "since": "2026-10"},
-    {"id": "no_levels_to_kernel", "rule": "Reports to the platform kernel never carry price levels (entry, stop, target, zones, key levels).", "source": "xauusd docs/SSOT.md §2", "since": "2026-11-05"},
-    {"id": "no_confirmation_no_entry", "rule": "Retired for the rooms on 2026-11-09: every room (15m included) is judged by its own quorum (h1_quorum, independent_rooms). The confirmation rule survives only in the legacy live room.", "source": "xauusd src/war-room.mjs CONFIRMATION_RULE; owner decisions 2026-11-05 and 2026-11-09", "since": "2026-11-05"},
-    {"id": "h1_quorum", "rule": "The H1 decision is the quorum of the 1H War Room, independent of the TradingView webhooks, of parity approval and of any single indicator signal: BUY or SELL only when the moderator concluded it and more than the 1-hour room's quorum share (0.5 by default) of the weight of the agents who spoke holds the matching bias; otherwise WAIT. Indicator signals are the agents' arguments, never gates or vetoes. Prices come from the 1-hour chart's own key-level zones; without a valid entry, stop and target the decision is WAIT.", "source": "xauusd docs/SSOT.md, The H1 decision is the room's quorum; owner decision 2026-11-09", "since": "2026-11-09"},
-    {"id": "independent_rooms", "rule": "Every timeframe's room is independent: its agents read only that timeframe's own data, never another timeframe's room, desk or decision and never another agent; the Consensus Discussion stays inside each timeframe over an anonymous bus, and every answer names the metrics it decided from, never an agent.", "source": "xauusd docs/SSOT.md, Independent rooms; owner decisions 2026-11-09", "since": "2026-11-09"},
-    {"id": "bias_beside_action", "rule": "Every opening states its action and its bias (BULLISH, BEARISH or NEUTRAL): the direction its own data leans, even when the action is WAIT.", "source": "xauusd docs/SSOT.md, Bias beside the action", "since": "2026-11-06"},
-    {"id": "support_rules", "rule": "A BUY or SELL conclusion needs at least one agent holding that stance; a BULLISH or BEARISH bias needs at least one agent holding it.", "source": "xauusd docs/SSOT.md, Conclusion", "since": "2026-11-06"},
-    {"id": "calibration_status_once", "rule": "Agents never mention calibration, parity or verification in their text; readers see each agent's calibration status once, next to its name. In the Live War Room 15m an agent with no calibrated statement speaks at confidence 0.4 or lower; the 1H, 4H and D1 rooms have no such cap (owner decision 2026-11-09).", "source": "xauusd docs/SSOT.md, Calibration status once", "since": "2026-11-05"},
-    {"id": "own_data_only", "rule": "Each HUD or indicator agent analyses only the data its own HUD or indicator produces.", "source": "xauusd docs/SSOT.md; RFC_HUD_AGENTS", "since": "2026-11-05"},
-    {"id": "fail_closed_wait", "rule": "Without a usable closed candle, or without a quorum, the H1 decision is WAIT, never a guess.", "source": "xauusd docs/SSOT.md, H1 chain; owner decision 2026-11-09", "since": "2026-10"},
-    {"id": "parity_trust_only", "rule": "Local engine trust comes only from the parity registry (24 consecutive matching candles); nothing is marked verified by hand, and the Pine sources and hashed engines are never edited.", "source": "xauusd AGENTS.md rule 6", "since": "2026-10"},
-    {"id": "promotion_by_owner", "rule": "No change to an engine parameter, a prompt or a knowledge item is promoted automatically: candidates run in shadow, are judged by outcome scoring with a significance test, and the owner approves a separate promotion PR. The one exception is the room quorum weighting (weighting_auto).", "source": "RFC_INDICATOR_AGENT_PLATFORM §4.3, §10 decision 1; RFC_AETHER_KNOWLEDGE_GUARDIAN §9", "since": "2026-11-05"},
-    {"id": "weighting_auto", "rule": "The quorum weighting of every room (each agent's own weight on its timeframe, in the bar's volatility and trend regime, and the quorum share) is tuned automatically per timeframe over a reviewed grid, without an operator: xauusd activates a point its replay rates better on discovery and holdout, at most once a week, rolls a worse one back in reverse shadow, and tells the owner on Telegram. Aether audits the reports and proposes nothing.", "source": "xauusd docs/SSOT.md, Room quorum weighting; owner decisions 2026-11-09", "since": "2026-11-09"},
-    {"id": "learned_is_not_canon", "rule": "Learned knowledge is labelled as learned, cites its evidence, and never redefines a field or a rule of the canon.", "source": "RFC_AETHER_KNOWLEDGE_GUARDIAN §0.4, §8", "since": "2026-11-07"},
-    {"id": "kernel_rules", "rule": "Calls to the platform kernel use RPC Service Bindings without shared secrets; reports are info or warning, never critical; a denial is final (no retry, no switching agent ids).", "source": "xauusd AGENTS.md rule 7; platform docs/XAUUSD-INTEGRATION.md", "since": "2026-11"}
+    {
+      "id": "execution_boundary",
+      "class": "constitutional",
+      "rule": "No Worker places an order or can read a broker credential. Trades happen only on the owner's own MetaTrader 5 terminal: the owner's EA executes the decision it reads from the signal API, or the Omega bridge executes what Omega plans and sizes from the owner's risk setting, at most 2% of equity per trade. Omega plans nothing unless both its switch and its page toggle are on, a real account also needs the typed LIVE arm, a kill closes the positions, and the EA and the Omega executor never run on the same account. Aether, the kernel and learned knowledge stay advisory.",
+      "template": "No Worker places an order or can read a broker credential. Trades happen only on the owner's own MetaTrader 5 terminal: the owner's EA executes the decision it reads from the signal API, or the Omega bridge executes what Omega plans and sizes from the owner's risk setting, at most {omega.risk_pct_max}% of equity per trade. Omega plans nothing unless both its switch and its page toggle are on, a real account also needs the typed LIVE arm, a kill closes the positions, and the EA and the Omega executor never run on the same account. Aether, the kernel and learned knowledge stay advisory.",
+      "anchors": [
+        {
+          "fact": "omega.risk_pct_max",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "omega.live_arm_required",
+          "value": true,
+          "format": "bool"
+        }
+      ],
+      "source": "xauusd AGENTS.md rule 8; docs/SSOT.md \"MT5 Expert Advisor\" and \"Omega broker engine\"; owner decisions 2026-11-09 (Langsung siap live, Omega memegang akses broker, Bridge di host ini, Mati sampai Anda aktifkan)",
+      "since": "2026-10",
+      "updated": "2026-11-11",
+      "supersedes": [
+        "advisory_only"
+      ]
+    },
+    {
+      "id": "no_levels_to_kernel",
+      "class": "constitutional",
+      "rule": "Reports to the platform kernel and decision cards to Aether never carry a price level, a size or order wording (entry, stop, target, zones, key levels, lots).",
+      "template": "Reports to the platform kernel and decision cards to Aether never carry a price level, a size or order wording (entry, stop, target, zones, key levels, lots).",
+      "anchors": [],
+      "source": "xauusd docs/SSOT.md §2; AGENTS.md rule 8",
+      "since": "2026-11-05",
+      "updated": "2026-11-11"
+    },
+    {
+      "id": "kernel_rules",
+      "class": "constitutional",
+      "rule": "Calls to the platform kernel use RPC Service Bindings without shared secrets; reports are info or warning, never critical; a denial is final (no retry, no switching agent ids).",
+      "template": "Calls to the platform kernel use RPC Service Bindings without shared secrets; reports are info or warning, never critical; a denial is final (no retry, no switching agent ids).",
+      "anchors": [],
+      "source": "xauusd AGENTS.md rule 7; platform docs/XAUUSD-INTEGRATION.md",
+      "since": "2026-11"
+    },
+    {
+      "id": "parity_trust_only",
+      "class": "constitutional",
+      "rule": "Local engine trust comes only from the autonomous parity registry (24 consecutive candles that match TradingView); nothing is marked verified by hand, and the Pine sources and hashed engines are never edited. The local lane is the decision lane (local); TradingView webhooks only calibrate it.",
+      "template": "Local engine trust comes only from the autonomous parity registry ({parity.approval_candles} consecutive candles that match TradingView); nothing is marked verified by hand, and the Pine sources and hashed engines are never edited. The local lane is the decision lane ({lanes.indicator_source}); TradingView webhooks only calibrate it.",
+      "anchors": [
+        {
+          "fact": "parity.approval_candles",
+          "value": 24,
+          "format": "num"
+        },
+        {
+          "fact": "lanes.indicator_source",
+          "value": "local",
+          "format": "text"
+        }
+      ],
+      "source": "xauusd AGENTS.md rule 6; docs/SSOT.md §3",
+      "since": "2026-10",
+      "updated": "2026-11-11"
+    },
+    {
+      "id": "fail_closed_wait",
+      "class": "constitutional",
+      "rule": "When the evidence is missing the answer is WAIT, never a guess. A room without a usable closed candle or without its quorum decides WAIT. The Decision Engine gives WAIT when any guardrail fails; when the council fails or answers invalidly, the strategy engine's decision stands only if its side passes every guardrail, otherwise WAIT. A closed market is always WAIT.",
+      "template": "When the evidence is missing the answer is WAIT, never a guess. A room without a usable closed candle or without its quorum decides WAIT. The Decision Engine gives WAIT when any guardrail fails; when the council fails or answers invalidly, the strategy engine's decision stands only if its side passes every guardrail, otherwise WAIT. A closed market is always WAIT.",
+      "anchors": [],
+      "source": "xauusd docs/SSOT.md, Decision Engine and H1 chain; owner decisions 2026-11-09",
+      "since": "2026-10",
+      "updated": "2026-11-11"
+    },
+    {
+      "id": "learned_is_not_canon",
+      "class": "constitutional",
+      "rule": "Learned knowledge is labelled as learned, cites its evidence, and never redefines a field or a rule of the canon. The doctrine changes only through a reviewed PR or an amendment Cerebrum executed (doctrine_protocol), never from learned knowledge.",
+      "template": "Learned knowledge is labelled as learned, cites its evidence, and never redefines a field or a rule of the canon. The doctrine changes only through a reviewed PR or an amendment Cerebrum executed (doctrine_protocol), never from learned knowledge.",
+      "anchors": [],
+      "source": "RFC_AETHER_KNOWLEDGE_GUARDIAN §0.4, §8",
+      "since": "2026-11-07",
+      "updated": "2026-11-11"
+    },
+    {
+      "id": "promotion_by_owner",
+      "class": "constitutional",
+      "rule": "No change to an engine parameter, a prompt or a knowledge item is promoted automatically: candidates run in shadow, are judged by outcome scoring with a significance test, and the owner approves a separate promotion PR. Two things change without an operator: the room quorum weighting (weighting_auto) and operational doctrine amendments inside their hard bounds that Cerebrum executed (doctrine_protocol).",
+      "template": "No change to an engine parameter, a prompt or a knowledge item is promoted automatically: candidates run in shadow, are judged by outcome scoring with a significance test, and the owner approves a separate promotion PR. Two things change without an operator: the room quorum weighting (weighting_auto) and operational doctrine amendments inside their hard bounds that Cerebrum executed (doctrine_protocol).",
+      "anchors": [],
+      "source": "RFC_INDICATOR_AGENT_PLATFORM §4.3, §10 decision 1; RFC_AETHER_KNOWLEDGE_GUARDIAN §9; owner decisions 2026-11-09 and 2026-11-11",
+      "since": "2026-11-05",
+      "updated": "2026-11-11"
+    },
+    {
+      "id": "doctrine_protocol",
+      "class": "constitutional",
+      "rule": "The doctrine follows the measured system through the Knowledge Council. Once a day its Nexus, Omega and Aether seats compare every rule's anchored facts with what the running system reports; a difference the reporting seat measured twice from the same deployed version, and the Aether seat validated, is proposed to the Cerebrum consensus. Cerebrum votes and executes it: an operational fact inside its hard bounds after the vote, anything else after one owner approval. Aether applies only amendments Cerebrum executed and folds them into the canon by a reviewed PR. No seat changes the doctrine by itself.",
+      "template": "The doctrine follows the measured system through the Knowledge Council. Once a day its Nexus, Omega and Aether seats compare every rule's anchored facts with what the running system reports; a difference the reporting seat measured twice from the same deployed version, and the Aether seat validated, is proposed to the Cerebrum consensus. Cerebrum votes and executes it: an operational fact inside its hard bounds after the vote, anything else after one owner approval. Aether applies only amendments Cerebrum executed and folds them into the canon by a reviewed PR. No seat changes the doctrine by itself.",
+      "anchors": [],
+      "source": "owner decision 2026-11-11 (autonomous doctrine protocol harus dilakukan oleh knowledge council, dilakukan harian dan di propose ke cerebrum untuk eksekusinya); platform control-plane-shared/src/doctrine.ts",
+      "since": "2026-11-11"
+    },
+    {
+      "id": "decision_engine_ssot",
+      "class": "operational",
+      "rule": "The Decision Engine is the single decision. At every 15m close one AI council, the only reader across the timeframes, chooses BUY, SELL or WAIT from witnesses that each judge from their own data, weighted D1 room 0.16, 4H room 0.16, 1H room 0.16, 15m room 0.12, News Daily 0.08, Macro War Room 0.04, strategy engine 0.08, key levels 0.05, regime 0.05, cross-timeframe trend 0.05, macro drivers 0.03, session 0.02; a missing or stale witness drops out and the rest renormalise. It decides inside deterministic guardrails it cannot break (market_open, fresh, quorum, confirmation, no_veto, levels, reward, confidence); a BUY or SELL that breaks one becomes WAIT. Prices come only from the Key Level Agent's plan, never from a model. Its decision feeds the EA, Omega, Telegram, the Signal Ledger and Nexus.",
+      "template": "The Decision Engine is the single decision. At every {decision.cadence} close one AI council, the only reader across the timeframes, chooses BUY, SELL or WAIT from witnesses that each judge from their own data, weighted {decision.witness_weights}; a missing or stale witness drops out and the rest renormalise. It decides inside deterministic guardrails it cannot break ({decision.guardrails}); a BUY or SELL that breaks one becomes WAIT. Prices come only from the Key Level Agent's plan, never from a model. Its decision feeds the EA, Omega, Telegram, the Signal Ledger and Nexus.",
+      "anchors": [
+        {
+          "fact": "decision.engine_enabled",
+          "value": true,
+          "format": "bool"
+        },
+        {
+          "fact": "decision.cadence",
+          "value": "15m",
+          "format": "text"
+        },
+        {
+          "fact": "decision.witness_weights",
+          "value": {
+            "D1": 0.16,
+            "H4": 0.16,
+            "H1": 0.16,
+            "M15": 0.12,
+            "NEWS": 0.08,
+            "MACRO": 0.04,
+            "STRATEGY": 0.08,
+            "KEY_LEVELS": 0.05,
+            "REGIME": 0.05,
+            "TREND_TF": 0.05,
+            "MACRO_DRIVERS": 0.03,
+            "SESSION": 0.02
+          },
+          "format": "weights"
+        },
+        {
+          "fact": "decision.guardrails",
+          "value": [
+            "market_open",
+            "fresh",
+            "quorum",
+            "confirmation",
+            "no_veto",
+            "levels",
+            "reward",
+            "confidence"
+          ],
+          "format": "list"
+        }
+      ],
+      "source": "xauusd docs/SSOT.md, Decision Engine; src/decision-engine.mjs; owner decisions 2026-11-09 and 2026-11-10",
+      "since": "2026-11-09",
+      "updated": "2026-11-11",
+      "supersedes": []
+    },
+    {
+      "id": "engine_thresholds",
+      "class": "operational",
+      "rule": "In the intraday mode the Decision Engine's BUY or SELL needs more than 50% of the witnesses' weight on its side, or a lean of at least 0.15 with more weight than the other side; a confirmation; no veto; a plan from the key levels paying at least 1.5R to its target; and a confidence of at least 0.4. The trading mode (scalp, intraday or swing) sets these thresholds.",
+      "template": "In the {decision.trading_mode} mode the Decision Engine's BUY or SELL needs more than {decision.quorum_min} of the witnesses' weight on its side, or a lean of at least {decision.lean} with more weight than the other side; a confirmation; no veto; a plan from the key levels paying at least {decision.min_rrr}R to its target; and a confidence of at least {decision.min_confidence}. The trading mode (scalp, intraday or swing) sets these thresholds.",
+      "anchors": [
+        {
+          "fact": "decision.trading_mode",
+          "value": "intraday",
+          "format": "text"
+        },
+        {
+          "fact": "decision.quorum_min",
+          "value": 0.5,
+          "format": "pct"
+        },
+        {
+          "fact": "decision.lean",
+          "value": 0.15,
+          "format": "num"
+        },
+        {
+          "fact": "decision.min_rrr",
+          "value": 1.5,
+          "format": "num"
+        },
+        {
+          "fact": "decision.min_confidence",
+          "value": 0.4,
+          "format": "num"
+        }
+      ],
+      "source": "xauusd src/decision-engine.mjs guardrailsFor and decide; owner decision 2026-11-10 (trading modes)",
+      "since": "2026-11-11"
+    },
+    {
+      "id": "confirmation_required",
+      "class": "operational",
+      "rule": "The rooms decide by their own quorum, without a confirmation gate. The Decision Engine never enters without a confirmation: the 15m or the 1H room decided that side, or a verified 5m or 15m Prophet confirmation; a 5m confirmation counts only while the 5m Prophet implementation is parity-approved.",
+      "template": "The rooms decide by their own quorum, without a confirmation gate. The Decision Engine never enters without a confirmation: the 15m or the 1H room decided that side, or a verified 5m or 15m Prophet confirmation; a 5m confirmation counts only while the 5m Prophet implementation is parity-approved.",
+      "anchors": [
+        {
+          "fact": "decision.confirmation_required",
+          "value": true,
+          "format": "bool"
+        }
+      ],
+      "source": "xauusd src/decision-engine.mjs (confirmation guardrail, verifiedM5Confirmation); supersedes no_confirmation_no_entry",
+      "since": "2026-11-11",
+      "supersedes": [
+        "no_confirmation_no_entry"
+      ]
+    },
+    {
+      "id": "h1_quorum",
+      "class": "operational",
+      "rule": "The H1 decision is the quorum of the 1H War Room: BUY or SELL only when the moderator concluded it and more than the room's quorum share (default 50%, tuned by weighting_auto) of the weight of the agents who spoke holds the matching bias, with prices from the 1H plan; otherwise WAIT. Indicator signals are the agents' arguments, never gates or vetoes. The H1 decision is one witness of the Decision Engine; it drives the EA and Telegram only while the Decision Engine is off.",
+      "template": "The H1 decision is the quorum of the 1H War Room: BUY or SELL only when the moderator concluded it and more than the room's quorum share (default {rooms.quorum_share_default}, tuned by weighting_auto) of the weight of the agents who spoke holds the matching bias, with prices from the 1H plan; otherwise WAIT. Indicator signals are the agents' arguments, never gates or vetoes. The H1 decision is one witness of the Decision Engine; it drives the EA and Telegram only while the Decision Engine is off.",
+      "anchors": [
+        {
+          "fact": "rooms.quorum_share_default",
+          "value": 0.5,
+          "format": "pct"
+        }
+      ],
+      "source": "xauusd docs/SSOT.md, The H1 decision is the room's quorum; owner decision 2026-11-09",
+      "since": "2026-11-09",
+      "updated": "2026-11-11"
+    },
+    {
+      "id": "independent_rooms",
+      "class": "operational",
+      "rule": "Every timeframe's room is independent: its agents read only that timeframe's own data, never another timeframe's room, desk or decision and never another agent; the Consensus Discussion stays inside each timeframe over an anonymous bus, and every answer names the metrics it decided from, never an agent. Only the Decision Engine's council reads across the timeframes.",
+      "template": "Every timeframe's room is independent: its agents read only that timeframe's own data, never another timeframe's room, desk or decision and never another agent; the Consensus Discussion stays inside each timeframe over an anonymous bus, and every answer names the metrics it decided from, never an agent. Only the Decision Engine's council reads across the timeframes.",
+      "anchors": [],
+      "source": "xauusd docs/SSOT.md, Independent rooms; owner decisions 2026-11-09",
+      "since": "2026-11-09"
+    },
+    {
+      "id": "bias_beside_action",
+      "class": "operational",
+      "rule": "Every opening states its action and its bias (BULLISH, BEARISH or NEUTRAL): the direction its own data leans, even when the action is WAIT.",
+      "template": "Every opening states its action and its bias (BULLISH, BEARISH or NEUTRAL): the direction its own data leans, even when the action is WAIT.",
+      "anchors": [],
+      "source": "xauusd docs/SSOT.md, Bias beside the action",
+      "since": "2026-11-06"
+    },
+    {
+      "id": "support_rules",
+      "class": "operational",
+      "rule": "A room's BUY or SELL conclusion needs at least one agent holding that stance; a BULLISH or BEARISH bias needs at least one agent holding it.",
+      "template": "A room's BUY or SELL conclusion needs at least one agent holding that stance; a BULLISH or BEARISH bias needs at least one agent holding it.",
+      "anchors": [],
+      "source": "xauusd docs/SSOT.md, Conclusion",
+      "since": "2026-11-06"
+    },
+    {
+      "id": "calibration_status_once",
+      "class": "operational",
+      "rule": "Agents never mention calibration, parity or verification in their text; readers see each agent's calibration status once, next to its name. In the Live War Room 15m an agent with no calibrated statement speaks at confidence 0.4 or lower; the 1H, 4H and D1 rooms have no such cap.",
+      "template": "Agents never mention calibration, parity or verification in their text; readers see each agent's calibration status once, next to its name. In the Live War Room 15m an agent with no calibrated statement speaks at confidence {room.m15_unverified_confidence_cap} or lower; the 1H, 4H and D1 rooms have no such cap.",
+      "anchors": [
+        {
+          "fact": "room.m15_unverified_confidence_cap",
+          "value": 0.4,
+          "format": "num"
+        }
+      ],
+      "source": "xauusd docs/SSOT.md, Calibration status once; owner decision 2026-11-09",
+      "since": "2026-11-05",
+      "updated": "2026-11-11"
+    },
+    {
+      "id": "own_data_only",
+      "class": "operational",
+      "rule": "Each HUD or indicator agent analyses only the data its own HUD or indicator produces.",
+      "template": "Each HUD or indicator agent analyses only the data its own HUD or indicator produces.",
+      "anchors": [],
+      "source": "xauusd docs/SSOT.md; RFC_HUD_AGENTS",
+      "since": "2026-11-05"
+    },
+    {
+      "id": "weighting_auto",
+      "class": "operational",
+      "rule": "The quorum weighting of every room is tuned automatically per timeframe over a reviewed grid (auto mode): xauusd activates a point its replay rates better on discovery and holdout, at most once every 7 days, rolls a worse one back after 100 rooms of reverse shadow, and tells the owner on Telegram. Aether audits the reports and proposes nothing.",
+      "template": "The quorum weighting of every room is tuned automatically per timeframe over a reviewed grid ({weighting.mode} mode): xauusd activates a point its replay rates better on discovery and holdout, at most once every {weighting.activation_min_days} days, rolls a worse one back after {weighting.rollback_min_rooms} rooms of reverse shadow, and tells the owner on Telegram. Aether audits the reports and proposes nothing.",
+      "anchors": [
+        {
+          "fact": "weighting.mode",
+          "value": "auto",
+          "format": "text"
+        },
+        {
+          "fact": "weighting.activation_min_days",
+          "value": 7,
+          "format": "num"
+        },
+        {
+          "fact": "weighting.rollback_min_rooms",
+          "value": 100,
+          "format": "num"
+        }
+      ],
+      "source": "xauusd docs/SSOT.md, Room quorum weighting; owner decisions 2026-11-09",
+      "since": "2026-11-09",
+      "updated": "2026-11-11"
+    },
+    {
+      "id": "event_caution",
+      "class": "operational",
+      "rule": "A High-impact USD event, from 120 minutes before to 30 minutes after it, is a caution in the decision, never a forced WAIT; the EA and Omega make no new entry in that window. After a release with its value, the Calendar Agent's bias follows the surprise within the event's learned horizon.",
+      "template": "A High-impact USD event, from {calendar.blackout_before_min} minutes before to {calendar.blackout_after_min} minutes after it, is a caution in the decision, never a forced WAIT; the EA and Omega make no new entry in that window. After a release with its value, the Calendar Agent's bias follows the surprise within the event's learned horizon.",
+      "anchors": [
+        {
+          "fact": "calendar.blackout_before_min",
+          "value": 120,
+          "format": "num"
+        },
+        {
+          "fact": "calendar.blackout_after_min",
+          "value": 30,
+          "format": "num"
+        }
+      ],
+      "source": "xauusd src/econ-calendar.mjs EVENT_GATE, src/ea-signal.mjs; owner decisions 2026-11-08 and 2026-11-10",
+      "since": "2026-11-08",
+      "updated": "2026-11-11"
+    },
+    {
+      "id": "omega_execution_gates",
+      "class": "operational",
+      "rule": "Omega opens at most once per signal, before it expires and within 10 minutes of the decision, outside the event blackout and the daily rollover quarantine (21:55-22:15 UTC), at a spread of at most 60 points, with fewer than 1 open positions and above the daily loss limit of 2% of the day's starting balance. It risks 0.5% of equity at the stop and keeps the plan's distances from the broker's own price; a position against the signal is closed.",
+      "template": "Omega opens at most once per signal, before it expires and within {omega.max_signal_age_min} minutes of the decision, outside the event blackout and the daily rollover quarantine ({omega.rollover_quarantine_utc} UTC), at a spread of at most {omega.max_spread_points} points, with fewer than {omega.max_positions} open positions and above the daily loss limit of {omega.max_daily_loss_pct}% of the day's starting balance. It risks {omega.risk_pct}% of equity at the stop and keeps the plan's distances from the broker's own price; a position against the signal is closed.",
+      "anchors": [
+        {
+          "fact": "omega.max_signal_age_min",
+          "value": 10,
+          "format": "num"
+        },
+        {
+          "fact": "omega.rollover_quarantine_utc",
+          "value": "21:55-22:15",
+          "format": "text"
+        },
+        {
+          "fact": "omega.max_spread_points",
+          "value": 60,
+          "format": "num"
+        },
+        {
+          "fact": "omega.max_positions",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "omega.max_daily_loss_pct",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "omega.risk_pct",
+          "value": 0.5,
+          "format": "num"
+        }
+      ],
+      "source": "xauusd src/omega-engine.mjs planIntents and OMEGA_DEFAULTS; docs/SSOT.md, Omega broker engine",
+      "since": "2026-11-09",
+      "updated": "2026-11-11"
+    }
+  ],
+  "retired": [
+    {
+      "id": "advisory_only",
+      "rule": "The server never trades: no broker integration, no broker credential, no order and no position size in the Workers. Since 2026-11-09 the owner's own MetaTrader 5 Expert Advisor may execute the H1 decision on the owner's terminal, sizing each trade from the owner's risk input, and Omega may pause or stop it. Aether, its reports and its learned knowledge stay advisory.",
+      "since": "2026-10",
+      "retired": "2026-11-11",
+      "superseded_by": "execution_boundary",
+      "reason": "Omega's broker engine plans and sizes trades since 2026-11-09, and the EA executes the Decision Engine's decision, not the H1 decision."
+    },
+    {
+      "id": "no_confirmation_no_entry",
+      "rule": "Retired for the rooms on 2026-11-09: every room (15m included) is judged by its own quorum (h1_quorum, independent_rooms). The confirmation rule survives only in the legacy live room.",
+      "since": "2026-11-05",
+      "retired": "2026-11-11",
+      "superseded_by": "confirmation_required",
+      "reason": "It said the confirmation rule was retired, but the Decision Engine requires a confirmation guardrail since 2026-11-09; agents reading it could argue for entries without one."
+    }
   ]
 }

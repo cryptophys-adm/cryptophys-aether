@@ -7,6 +7,7 @@ import { CANON } from "./canon.generated.mjs";
 import { canonChunks } from "./canon-chunks.mjs";
 import { embedTexts } from "./embed.mjs";
 import { ensureSchema } from "./store.mjs";
+import { appliedAmendments, effectiveDoctrine, effectiveSha } from "./doctrine.mjs";
 
 export const INDEX_SCHEMA_SQL = Object.freeze([
   "CREATE TABLE IF NOT EXISTS aether_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)",
@@ -32,9 +33,11 @@ export async function syncCanon(env, { now = Date.now() } = {}) {
   const db = env.AETHER_DB;
   if (!db || !env.AI || !env.CANON_INDEX) return { status: "unavailable" };
   await ensureIndexSchema(db);
-  const sha = CANON.content_sha256;
+  // The doctrine in force: an amendment Cerebrum executed re-indexes the canon (owner 2026-11-11).
+  const sha = await effectiveSha(db);
   if ((await meta(db, "canon_indexed_sha")) === sha) return { status: "current", canon: sha.slice(0, 8) };
-  const chunks = canonChunks();
+  const doctrine = sha === CANON.content_sha256 ? null : effectiveDoctrine(await appliedAmendments(db));
+  const chunks = canonChunks(CANON, { doctrine, sha });
   const vectors = await embedTexts(env, chunks.map((c) => c.text), { now });
   if (!vectors) return { status: "budget_or_model_refused", chunks: chunks.length };
   for (let i = 0; i < chunks.length; i += 100) {
