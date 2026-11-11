@@ -140,9 +140,10 @@ test("runCouncil: proposes to Cerebrum, applies only what Cerebrum executed, re-
   assert.deepEqual(k.proposals.map((p) => [p.action, p.target]), [["amend_doctrine", "engine-thresholds"]]);
   assert.equal(k.reports.length, 1);
   assert.equal(k.reports[0].kind, "knowledge_audit");
-  // The next hourly sync applies the executed amendment.
+  // The session applies what Cerebrum executed right away; the next hourly sync finds nothing new.
+  assert.equal(r.applied.applied, 1);
   const s = await syncAmendments(env, { now: NOW + H });
-  assert.equal(s.applied, 1);
+  assert.equal(s.applied, 0);
   const view = await doctrineView(env, { now: NOW + H });
   const rule = view.rules.find((x) => x.id === "engine_thresholds");
   assert.match(rule.rule, /more than 55% of the witnesses' weight/);
