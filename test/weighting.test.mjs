@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { ingestCards, resetSchemaCacheForTests } from "../src/store.mjs";
 import { runCuration, learnedPack, syncReviews, resetKnowledgeSchemaCacheForTests } from "../src/knowledge.mjs";
 import {
-  WEIGHTING_REPORT_VERSION, pointProblems, reportProblems, storeWeightingReport, latestWeightingReport, weightingCandidate, resetWeightingSchemaCacheForTests
+  WEIGHTING_REPORT_VERSION, WITNESS_REPORT_VERSION, witnessWeightsProblems, pointProblems, reportProblems, storeWeightingReport, latestWeightingReport, weightingCandidate, resetWeightingSchemaCacheForTests
 } from "../src/weighting.mjs";
 import { CANON } from "../src/canon.generated.mjs";
 
@@ -145,4 +145,31 @@ test("auto mode (owner decisions 2026-11-09): reports are kept per timeframe as 
   assert.equal((await storeWeightingReport(db, { ...auto("5"), timeframe: "5" })).accepted, false, "an unknown timeframe is refused");
   assert.equal((await latestWeightingReport(db, "240")).report.timeframe, "240");
   assert.equal(weightingCandidate(auto("60"), { cardIds: Array.from({ length: 12 }, (_, i) => `d:60:${NOW - i * H}:0`), canon: CANON }), null, "xauusd activates by itself");
+});
+
+test("the Decision Engine's witness-weighting report (timeframe engine) is checked and kept beside the rooms'", async () => {
+  const B11 = { D1: 0.16, H4: 0.16, H1: 0.16, M15: 0.12, NEWS: 0.08, MACRO: 0.04, STRATEGY: 0.08, KEY_LEVELS: 0.05, REGIME: 0.05, TREND_TF: 0.05, MACRO_DRIVERS: 0.03, SESSION: 0.02 };
+  const up = { ...B11, NEWS: 0.12, D1: 0.1529, H4: 0.1529, H1: 0.1529, M15: 0.1147, MACRO: 0.0382, STRATEGY: 0.0764, KEY_LEVELS: 0.0478, REGIME: 0.0478, TREND_TF: 0.0478, MACRO_DRIVERS: 0.0287 };
+  up.D1 = Math.round((1 - Object.entries(up).filter(([k]) => k !== "D1").reduce((s, [, v]) => s + v, 0)) * 10_000) / 10_000;
+  const witness = {
+    version: WITNESS_REPORT_VERSION, equation: "cryptophys.witness-tuning.v1", generated_at: new Date(NOW).toISOString(), mode: "auto", timeframe: "engine", window_days: 21, rooms: 380,
+    active: { id: "ww:00000001", params: B11, source: "default", activated_at: null, change: "none: the B-11 weights" },
+    agents: [], candidates: [{ id: "ww:00000002", changed: "NEWS", change: "News Daily up from 8% to 12%", params: up, verdict: "collecting", discovery: { bars: 120 }, holdout: { bars: 100, complete: true, required_bars: 100 } }],
+    replay_fidelity: { checks: 760, matched: 741, share: 0.975 }, reverse: null, history: []
+  };
+  assert.deepEqual(witnessWeightsProblems(B11), []);
+  assert.deepEqual(witnessWeightsProblems(up), []);
+  assert.match(witnessWeightsProblems({ ...B11, D1: 0.3, H4: 0.02 }).join(), /out_of_bounds:D1/);
+  assert.match(witnessWeightsProblems({ ...B11, D1: 0.2 }).join(), /sum_not_1/);
+  assert.deepEqual(reportProblems(witness), []);
+  assert.ok(reportProblems({ ...witness, timeframe: "60" }).includes("timeframe_invalid"));
+  assert.ok(reportProblems({ ...witness, active: { ...witness.active, params: DEFAULT } }).includes("active_invalid"), "a room grid point is not a witness set");
+  assert.ok(reportProblems({ ...witness, candidates: [{ ...witness.candidates[0], params: { D1: 1 } }] }).includes("candidate_invalid"));
+  assert.ok(reportProblems({ ...report([]), timeframe: "engine" }).includes("timeframe_invalid"), "a room report cannot take the engine row");
+  assert.ok(reportProblems({ ...witness, control: { price: 1 } }).some((p) => p.startsWith("forbidden_key")));
+  const db = d1();
+  assert.equal((await storeWeightingReport(db, witness, { now: NOW })).accepted, true);
+  assert.equal((await storeWeightingReport(db, report([]), { now: NOW })).accepted, true);
+  assert.equal((await latestWeightingReport(db, "engine")).report.rooms, 380);
+  assert.equal((await latestWeightingReport(db)).report.rooms, 320, "the 1H row is untouched");
 });

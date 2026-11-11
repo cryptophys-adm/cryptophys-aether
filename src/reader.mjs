@@ -73,7 +73,7 @@ export const SYNC_LIMITS = Object.freeze({
   ingest_ms: 2 * HOUR,          // xauusd pushes cards every hour (the first sweep after the H1 close)
   embed_backlog_ms: 2 * HOUR,   // the cron at :52 embeds up to 50 cards an hour
   canon_index_ms: 2 * HOUR,     // the cron re-indexes a new canon within the hour
-  weighting_ms: Object.freeze({ "15": 3 * HOUR, "60": 3 * HOUR, "240": 9 * HOUR, "1D": 50 * HOUR })
+  weighting_ms: Object.freeze({ "15": 3 * HOUR, "60": 3 * HOUR, "240": 9 * HOUR, "1D": 50 * HOUR, engine: 3 * HOUR })
 });
 
 /** Pure: whether XAUUSD trades at `now` (closed from Friday 22:00 to Sunday 22:00 UTC). */
