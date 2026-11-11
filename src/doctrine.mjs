@@ -401,3 +401,38 @@ export async function doctrineView(env, { now = Date.now() } = {}) {
     facts: latest ? { received_at: latest.received_at, measured_at: latest.measured_at, seats: Object.fromEntries(Object.entries(latest.seats || {}).map(([k, s]) => [k, { version_id: s.version_id ?? null, facts: Object.keys(s.facts || {}).length }])) } : null
   };
 }
+
+// ---------------------------------------------------------------- Omega's policy (B-12, issue #227)
+// Owner 2026-11-11 ("All": the deferred plans, B-12 among them; docs/PROPOSAL_AETHER_OMEGA_POLICY.md in
+// xauusd): Aether is the source of Omega's risk policy. The values are the doctrine in force (the canon
+// plus the amendments Cerebrum executed after the Knowledge Council and the owner approved them), never
+// a value Aether invents. The xauusd Worker pulls this pack hourly and applies it only when the owner's
+// switch OMEGA_POLICY_AUTO is on, within its own hard bounds.
+export const OMEGA_POLICY_VERSION = "cryptophys.omega-policy.v1";
+const OMEGA_POLICY_FACTS = Object.freeze({
+  "omega.risk_pct": "risk_pct", "omega.max_positions": "max_positions", "omega.max_daily_loss_pct": "max_daily_loss_pct",
+  "omega.max_spread_points": "max_spread_points", "omega.max_signal_age_min": "max_signal_age_min"
+});
+
+/** Pure: Omega's policy from the doctrine in force; each value within the fact's bounds, else left out. */
+export function omegaPolicyOf(rules) {
+  const values = {}, amended = {};
+  for (const r of rules || []) {
+    for (const a of r.anchors || []) {
+      const key = OMEGA_POLICY_FACTS[a.fact];
+      if (!key || boundProblem(a.fact, a.value)) continue;
+      values[key] = a.value;
+      if (r.amended && !sameValue(a.value, a.canon_value)) amended[key] = { from: a.canon_value, amendment_id: r.amended.amendment_id, executed_at: r.amended.executed_at };
+    }
+  }
+  return { values, amended };
+}
+
+/** The pack the xauusd Worker pulls: the values in force, the doctrine's sha and the amendments behind them. */
+export async function omegaPolicy(env) {
+  const db = env?.AETHER_DB;
+  let applied = [];
+  try { applied = db ? await appliedAmendments(db) : []; } catch { applied = []; }
+  const { values, amended } = omegaPolicyOf(effectiveDoctrine(applied));
+  return { version: OMEGA_POLICY_VERSION, doctrine_sha: await effectiveSha(db).catch(() => CANON.content_sha256), values, amended, advisory: "Applied by Omega only when its owner's switch is on, within its own hard bounds." };
+}

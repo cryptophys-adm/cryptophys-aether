@@ -22,7 +22,7 @@ import { budgetUsed } from "./budget.mjs";
 import { runCuration, syncReviews, learnedPack, knowledgeCounts } from "./knowledge.mjs";
 import { storeWeightingReport, weightingReports } from "./weighting.mjs";
 import { aetherOverview, aetherSync } from "./reader.mjs";
-import { storeFacts, syncAmendments, runCouncil, COUNCIL_HOUR_UTC } from "./doctrine.mjs";
+import { storeFacts, syncAmendments, runCouncil, COUNCIL_HOUR_UTC, omegaPolicy } from "./doctrine.mjs";
 
 const json = (body, status = 200) => new Response(JSON.stringify(body, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const canonInfo = () => ({ version: CANON.version, content_sha256: CANON.content_sha256, files: CANON.files, kb_version: CANON.indicator.kb_version, kb_content_sha256: CANON.indicator.kb_content_sha256 });
@@ -33,6 +33,8 @@ export class KnowledgeIngress extends WorkerEntrypoint {
   async canonInfo() { return canonInfo(); }
   /** The approved learned pack (phase A6): for xauusd's shadow arm, and the weighting items it activates. */
   async learnedPack() { return learnedPack(this.env); }
+  /** Omega's risk policy from the doctrine in force (B-12): pulled hourly by the xauusd Worker. */
+  async omegaPolicy() { return omegaPolicy(this.env); }
   /** xauusd's H1 quorum weighting report (cryptophys.weighting-report.v1), hourly; the latest is kept. */
   async ingestWeightingReport(report) { return storeWeightingReport(this.env.AETHER_DB, report); }
   /** The doctrine facts (cryptophys.doctrine-facts.v1), hourly: the Nexus and Omega seats of the Knowledge Council. */
