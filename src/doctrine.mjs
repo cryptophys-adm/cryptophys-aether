@@ -6,8 +6,8 @@
 //   nexus  the decision side (Decision Engine, rooms, weighting, calendar, parity, lanes);
 //   omega  the execution side (the Omega engine's settings in force and its fixed gates).
 // Once a day the council meets (runCouncil): for every rule whose anchored facts differ from the
-// effective doctrine, the reporting seat agrees only when it measured the new value in two reports at
-// least 45 minutes apart from the same deployed version, and the Aether seat agrees only when the rule
+// effective doctrine, the reporting seat agrees only when it measured the same new value in two reports
+// at least 45 minutes apart (their deployed versions are kept as evidence), and the Aether seat agrees only when the rule
 // is in force, the text renders and an operational value sits inside its hard bound. When every seat
 // involved agrees, the council proposes the amendment to the Cerebrum consensus (consensus.propose as
 // the knowledge-council agent); Cerebrum votes and executes it. Aether applies only the amendments
@@ -185,9 +185,12 @@ export function councilReview({ rules, latest, previous, session, canon = CANON 
     for (const d of drifts) {
       const before = previous?.seats?.[d.seat];
       const now = latest.seats[d.seat];
-      const stable = Boolean(before) && Object.hasOwn(before.facts, d.fact) && sameValue(before.facts[d.fact], d.observed) && before.version_id === now.version_id;
+      // Owner 2026-11-11 (first live reports): xauusd deploys several times a day, so the same value
+      // measured twice across a redeploy counts; the versions stay in the evidence.
+      const stable = Boolean(before) && Object.hasOwn(before.facts, d.fact) && sameValue(before.facts[d.fact], d.observed);
       d.stable = stable;
-      if (!stable) { seats[d.seat] = "observing"; why.push(`${d.fact} measured once from this version`); }
+      d.versions = [before?.version_id ?? null, now?.version_id ?? null];
+      if (!stable) { seats[d.seat] = "observing"; why.push(`${d.fact} measured once`); }
       else if (seats[d.seat] !== "observing") seats[d.seat] = "agree";
     }
     const facts = drifts.map((d) => d.fact);
