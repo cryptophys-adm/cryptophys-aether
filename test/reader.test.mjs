@@ -78,6 +78,17 @@ test("a weighting report is summarised: better candidates first, the latest hist
   assert.equal(s.reverse.rooms, 40);
   assert.equal(s.agents[0].weight, 1.2);
   assert.equal(weightingSummary("15", null).rooms, 0);
+  const e = weightingSummary("engine", {
+    mode: "auto", rooms: 380, active: { id: "ww:1", params: { D1: 0.16 }, source: "auto_tuned", activated_at: "2026-11-12T10:00:00Z", change: "News Daily up from 8% to 12%" },
+    agents: [], control: { scored_rooms: 300, accuracy: 0.55, entries_taken: 40 }, replay_fidelity: { checks: 760, matched: 741, share: 0.975 },
+    candidates: [{ id: "ww:2", changed: "NEWS", change: "News Daily up", params: { D1: 0.15 }, verdict: "collecting", same_rooms: 300, differing_decisions: 12, discovery: { bars: 200 } }]
+  }, "2026-11-12T11:00:00Z");
+  assert.equal(e.kind, "witness_weights");
+  assert.equal(e.active.source, "auto_tuned");
+  assert.equal(e.replay_fidelity.share, 0.975);
+  assert.equal(e.control.accuracy, 0.55);
+  assert.deepEqual([e.candidates[0].params, e.candidates[0].differing_decisions], [{ D1: 0.15 }, 12]);
+  assert.equal(s.kind, undefined, "a room report keeps its shape");
 });
 
 test("the sync checks: fresh feeds are ok; a stale feed warns while the market was open and idles over the weekend", async () => {

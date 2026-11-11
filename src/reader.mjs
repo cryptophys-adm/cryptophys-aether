@@ -49,6 +49,7 @@ export function weightingSummary(timeframe, report, receivedAt) {
   const r = report || {};
   const candidates = (r.candidates || []).map((c) => ({
     id: c.id, changed: c.changed ?? null, change: c.change ?? null, verdict: c.verdict ?? null,
+    ...(timeframe === "engine" ? { params: c.params ?? null, same_rooms: c.same_rooms ?? null, differing_decisions: c.differing_decisions ?? null } : {}),
     discovery: c.discovery ? { bars: c.discovery.bars ?? null, accuracy: c.discovery.accuracy ?? null, control_accuracy: c.discovery.control_accuracy ?? null, p_holm: c.discovery.p_holm ?? null } : null,
     holdout: c.holdout ? { bars: c.holdout.bars ?? null, required_bars: c.holdout.required_bars ?? null, complete: Boolean(c.holdout.complete), accuracy: c.holdout.accuracy ?? null, control_accuracy: c.holdout.control_accuracy ?? null } : null
   }));
@@ -57,7 +58,10 @@ export function weightingSummary(timeframe, report, receivedAt) {
   return {
     timeframe, received_at: receivedAt ?? null, generated_at: r.generated_at ?? null, mode: r.mode ?? null, equation: r.equation ?? null,
     rooms: r.rooms ?? 0, window_days: r.window_days ?? null, regimes: r.regimes ?? null,
-    active: r.active ? { id: r.active.id ?? null, params: r.active.params ?? null, activated_at: r.active.activated_at ?? null, change: r.active.change ?? null } : null,
+    active: r.active ? { id: r.active.id ?? null, params: r.active.params ?? null, source: r.active.source ?? null, activated_at: r.active.activated_at ?? null, change: r.active.change ?? null } : null,
+    // The Decision Engine's witness weights (timeframe "engine", owner 2026-11-11): the replayed decisions, how
+    // often the replayed quorum check matches the recorded one, and the control's accuracy.
+    ...(timeframe === "engine" ? { kind: "witness_weights", replay_fidelity: r.replay_fidelity ?? null, control: r.control ?? null } : {}),
     agents: (r.agents || []).map((a) => ({ agent: a.agent, weight: a.weight ?? null, accuracy: a.accuracy ?? null, calibration: a.calibration ?? null, decisive: a.decisive ?? null })),
     candidates: candidates.slice(0, 16),
     reverse: r.reverse ? { previous_id: r.reverse.previous_id ?? null, since: r.reverse.since ?? null, rooms: r.reverse.rooms ?? 0, p_value: r.reverse.p_value ?? null, previous_accuracy: r.reverse.previous_accuracy ?? null, active_accuracy: r.reverse.active_accuracy ?? null } : null,
