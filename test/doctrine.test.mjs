@@ -89,13 +89,17 @@ test("a drift measured twice from the same version, inside its bound: every seat
   assert.ok(JSON.stringify(item.proposal).length < 2000, "fits the kernel's params limit");
 });
 
-test("measured once, or from another deployed version: the seat keeps observing", () => {
+test("measured once, or changed between the reports: the seat keeps observing; the same value across a redeploy counts", () => {
   const changed = { "omega.risk_pct": 1 };
   const once = councilReview({ rules: asRules(), latest: seatsOf(report(NOW, { omega: changed })), previous: seatsOf(report(NOW - H)), session: "kc_x-1" }).find((r) => r.rule === "omega_execution_gates");
   assert.equal(once.status, "observing");
   assert.equal(once.seats.omega, "observing");
+  const moving = councilReview({ rules: asRules(), latest: seatsOf(report(NOW, { omega: changed })), previous: seatsOf(report(NOW - H, { omega: { "omega.risk_pct": 1.5 } })), session: "kc_x-1" }).find((r) => r.rule === "omega_execution_gates");
+  assert.equal(moving.status, "observing", "a value still moving is not proposed");
+  // Owner 2026-11-11: xauusd redeploys several times a day; the same value from two versions counts.
   const redeployed = councilReview({ rules: asRules(), latest: seatsOf(report(NOW, { omega: changed, omegaVersion: "v-2" })), previous: seatsOf(report(NOW - H, { omega: changed })), session: "kc_x-1" }).find((r) => r.rule === "omega_execution_gates");
-  assert.equal(redeployed.status, "observing");
+  assert.equal(redeployed.status, "propose");
+  assert.deepEqual(redeployed.drifts[0].versions, ["v-1", "v-2"], "both versions are kept as evidence");
 });
 
 test("out of bounds: the Aether seat refuses; a constitutional or unbounded fact goes to the owner as amend_constitution", () => {

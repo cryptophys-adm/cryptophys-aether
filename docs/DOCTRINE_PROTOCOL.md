@@ -37,8 +37,10 @@ text with a model.
    - It then compares every anchored fact of the doctrine in force with the latest facts report
      (at most 3 hours old).
 2. **Each differing rule gets a status:**
-   - `observing`: the reporting seat agrees only when it measured the new value twice, at least
-     45 minutes apart, from the same deployed version. Until then the rule waits.
+   - `observing`: the reporting seat agrees only when it measured the same new value twice, at least
+     45 minutes apart. Until then the rule waits. The deployed versions of both reports are kept as
+     evidence; a redeploy between them does not reset the count (owner 2026-11-11: xauusd deploys
+     several times a day).
    - `refused`: the Aether seat refuses an operational value outside its hard bound.
    - `unreported`: a fact the system no longer reports. The code changed shape, and only an owner PR
      can update the canon.
