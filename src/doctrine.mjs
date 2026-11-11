@@ -363,6 +363,9 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
       if (r?.outcome === "denied") break; // a denial (rate limit, kill switch) is final for this session
     }
   }
+  // An amendment Cerebrum executed during this session is applied now, not at the next hourly sync
+  // (production 2026-11-11: both proposals executed at 03:52 and waited an hour to apply).
+  const applied = proposals.some((p) => p.status === "executed") ? await syncAmendments(env, { now }) : null;
   const slim = review.map(({ rule, class: cls, status, action, drifts, seats, reasons, unreported }) => ({ rule, class: cls, status, action: action ?? null, drifts: drifts ?? [], seats: seats ?? null, reasons: reasons ?? [], unreported: unreported ?? [] }));
   await db.prepare("INSERT OR REPLACE INTO council_sessions (session_id, held_at, mode, facts_at, review_json, proposals_json) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(session, at, mode, latest?.received_at ?? null, JSON.stringify(slim), JSON.stringify(proposals)).run();
@@ -373,7 +376,7 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
     ai_status: "deterministic",
     body: { advisory: "Doctrine review; Cerebrum decides and executes every amendment.", session, mode, facts_at: latest?.received_at ?? null, open: open.slice(0, 20), proposals }
   });
-  return { status: "ok", session, mode, facts: Boolean(latest), reviewed: slim.length, open: open.length, proposals, sync, report: report?.outcome ?? null };
+  return { status: "ok", session, mode, facts: Boolean(latest), reviewed: slim.length, open: open.length, proposals, sync, applied, report: report?.outcome ?? null };
 }
 
 /** The doctrine for the overview: in force, retired, the last session, the facts' freshness. Never throws. */
