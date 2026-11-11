@@ -22,6 +22,7 @@ import { budgetUsed } from "./budget.mjs";
 import { runCuration, syncReviews, learnedPack, knowledgeCounts } from "./knowledge.mjs";
 import { storeWeightingReport, weightingReports } from "./weighting.mjs";
 import { aetherOverview, aetherSync } from "./reader.mjs";
+import { storeFacts, syncAmendments, runCouncil, COUNCIL_HOUR_UTC } from "./doctrine.mjs";
 
 const json = (body, status = 200) => new Response(JSON.stringify(body, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const canonInfo = () => ({ version: CANON.version, content_sha256: CANON.content_sha256, files: CANON.files, kb_version: CANON.indicator.kb_version, kb_content_sha256: CANON.indicator.kb_content_sha256 });
@@ -34,6 +35,8 @@ export class KnowledgeIngress extends WorkerEntrypoint {
   async learnedPack() { return learnedPack(this.env); }
   /** xauusd's H1 quorum weighting report (cryptophys.weighting-report.v1), hourly; the latest is kept. */
   async ingestWeightingReport(report) { return storeWeightingReport(this.env.AETHER_DB, report); }
+  /** The doctrine facts (cryptophys.doctrine-facts.v1), hourly: the Nexus and Omega seats of the Knowledge Council. */
+  async ingestDoctrineFacts(facts) { return storeFacts(this.env.AETHER_DB, facts); }
 }
 
 /**
@@ -80,8 +83,11 @@ export default {
       await step("canon_sync", () => syncCanon(env, { now }));
       await step("embed_cards", () => embedPendingCards(env, { now }));
       await step("knowledge_reviews", () => syncReviews(env, { now }));
+      // Owner 2026-11-11: the doctrine amendments Cerebrum executed, every hour; the council once a day.
+      await step("doctrine_amendments", () => syncAmendments(env, { now }));
       if (new Date(now).getUTCHours() === 1) await step("digest", () => runDigest(env, { now }));
       if (new Date(now).getUTCHours() === 2) await step("curation", () => runCuration(env, { now }));
+      if (new Date(now).getUTCHours() === COUNCIL_HOUR_UTC) await step("knowledge_council", () => runCouncil(env, { now }));
     })());
   }
 };

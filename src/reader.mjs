@@ -10,6 +10,7 @@ import { budgetUsed } from "./budget.mjs";
 import { knowledgeCounts, curationProgressOf } from "./knowledge.mjs";
 import { weightingReports } from "./weighting.mjs";
 import { complianceFindings, COMPLIANCE_WARN_PER_100 } from "./guardian.mjs";
+import { doctrineView, effectiveSha } from "./doctrine.mjs";
 
 const DAY_MS = 86_400_000;
 const safe = async (fn, fallback = null) => { try { return await fn(); } catch { return fallback; } };
@@ -123,11 +124,13 @@ export async function aetherSync(env, { now = Date.now() } = {}) {
   const one = async (sql, ...p) => (db ? await safe(async () => await db.prepare(sql).bind(...p).first(), null) : null);
   const lastIngest = await one("SELECT MAX(received_at) AS at FROM ingest_log");
   const canonMeta = await one("SELECT value, updated_at FROM aether_meta WHERE key = 'canon_indexed_sha'");
+  // The index holds the doctrine in force (canon plus executed amendments), so that is what it must match.
+  const canonSha = db ? await safe(() => effectiveSha(db), CANON.content_sha256) : CANON.content_sha256;
   const backlog = await one("SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM decision_cards WHERE embedded_at IS NULL OR embedded_at < updated_at");
   const weighting = db ? await safe(async () => (await weightingReports(db)).map((w) => ({ timeframe: w.timeframe, received_at: w.received_at })), []) : [];
   const aiUsed = db ? await safe(() => budgetUsed(env, { now }), 0) : 0;
   return syncChecks({
-    now, lastIngestAt: lastIngest?.at ?? null, canonIndexedSha: canonMeta?.value ?? null, canonSha: CANON.content_sha256, canonIndexedAt: canonMeta?.updated_at ?? null,
+    now, lastIngestAt: lastIngest?.at ?? null, canonIndexedSha: canonMeta?.value ?? null, canonSha, canonIndexedAt: canonMeta?.updated_at ?? null,
     oldestPendingAt: backlog?.oldest ?? null, pending: Number(backlog?.n) || 0, weighting, aiUsed, aiLimit: Number(env.AI_DAILY_LIMIT) || 60,
     kbSha: CANON.indicator?.kb_content_sha256 ?? null
   });
@@ -148,6 +151,7 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
   const reports = db ? await safe(() => weightingReports(db), []) : [];
   const weighting = reports.map((w) => weightingSummary(w.timeframe, w.report, w.received_at));
   const roles = CANON.roles?.agents || [];
+  const doctrine = await safe(() => doctrineView(env, { now }), null);
   return {
     service: "cryptophys-aether", phase: env.AETHER_PHASE ?? null, generated_at: new Date(now).toISOString(),
     canon: {
@@ -157,7 +161,8 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
       kb: CANON.indicator?.kb ? { version: CANON.indicator.kb.version ?? null, status: CANON.indicator.kb.status ?? null, sections: Object.keys(CANON.indicator.kb).filter((k) => !["version", "status", "purpose"].includes(k)), input_lanes: Object.keys(CANON.indicator.kb.input_lanes || {}) } : null,
       roles: roles.map((a) => ({ id: a.id, name: a.name ?? null, kind: a.kind ?? null, family: a.family ?? null })),
       definitions: Object.keys(CANON.definitions || {}).filter((k) => !["version", "note"].includes(k)),
-      doctrine: (CANON.doctrine?.rules || []).map((r) => ({ id: r.id, rule: r.rule, since: r.since ?? null, status: r.status ?? null }))
+      // The doctrine in force (owner 2026-11-11): canon rules with the amendments Cerebrum executed.
+      doctrine: (doctrine?.rules ?? CANON.doctrine?.rules ?? []).map((r) => ({ id: r.id, class: r.class ?? null, rule: r.rule, since: r.since ?? null, updated: r.updated ?? null, amended: r.amended ?? null }))
     },
     cards, ingest: { last_24h: ingest24, recent: ingest },
     indexes: db ? await safe(() => indexStatus(env), null) : null,
@@ -165,6 +170,7 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
     knowledge: { counts: db ? await safe(() => knowledgeCounts(db), {}) : {}, items: knowledgeItems },
     guardian: { window_hours: 24, cards: lastDay.length, threshold_per_100: COMPLIANCE_WARN_PER_100, findings: complianceFindings(lastDay).slice(0, 30) },
     weighting,
+    doctrine,
     progress: {
       curation: db ? await curationProgressOf(db, { now }) : null,
       weighting: reports.map((w) => weightingProgress(w.timeframe, w.report, w.received_at))
