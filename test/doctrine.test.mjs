@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { CANON } from "../src/canon.generated.mjs";
 import {
   councilReview, effectiveDoctrine, effectiveSha, renderRule, runCouncil, storeFacts, syncAmendments, doctrineView, validateFacts,
-  resetDoctrineSchemaCacheForTests, sessionIdAt, canonShort, FACTS_SCHEMA, MAX_PROPOSALS_PER_SESSION
+  resetDoctrineSchemaCacheForTests, sessionIdAt, canonShort, FACTS_SCHEMA, MAX_PROPOSALS_PER_SESSION, omegaPolicy, omegaPolicyOf, OMEGA_POLICY_VERSION
 } from "../src/doctrine.mjs";
 
 function d1() {
@@ -186,4 +186,27 @@ test("the template renderer keeps unknown tokens and formats each kind", () => {
   assert.equal(renderRule("{a.b} and {c.d}", [{ fact: "a.b", value: 0.5, format: "pct" }]), "50% and {c.d}");
   assert.equal(renderRule("{x.y}", [{ fact: "x.y", value: { D1: 0.5, SESSION: 0.5 }, format: "weights" }]), "D1 room 0.5, session 0.5");
   assert.equal(renderRule("{x.y}", [{ fact: "x.y", value: true, format: "bool" }]), "on");
+});
+
+
+test("B-12: Omega's policy is the doctrine in force, an amended value marked with its amendment; out-of-bound values are left out", async () => {
+  const canon = omegaPolicyOf(effectiveDoctrine([]));
+  const canonValue = (fact) => CANON.doctrine.rules.flatMap((r) => r.anchors).find((a) => a.fact === fact).value;
+  assert.deepEqual(canon.values, {
+    risk_pct: canonValue("omega.risk_pct"), max_positions: canonValue("omega.max_positions"), max_daily_loss_pct: canonValue("omega.max_daily_loss_pct"),
+    max_spread_points: canonValue("omega.max_spread_points"), max_signal_age_min: canonValue("omega.max_signal_age_min")
+  });
+  assert.deepEqual(canon.amended, {});
+  const rule = CANON.doctrine.rules.find((r) => r.anchors.some((a) => a.fact === "omega.risk_pct"));
+  const amendment = { amendment_id: "cns_1", rule: rule.id, action: "amend_doctrine", values: { "omega.risk_pct": 0.4 }, canon: canonShort(), executed_at: "2026-11-12T04:00:00Z" };
+  const amended = omegaPolicyOf(effectiveDoctrine([amendment]));
+  assert.equal(amended.values.risk_pct, 0.4);
+  assert.deepEqual(amended.amended.risk_pct, { from: canonValue("omega.risk_pct"), amendment_id: "cns_1", executed_at: "2026-11-12T04:00:00Z" });
+  const outOfBound = omegaPolicyOf(effectiveDoctrine([{ ...amendment, values: { "omega.risk_pct": 9 } }]));
+  assert.equal(outOfBound.values.risk_pct, undefined, "a value out of the fact's bounds is never sent");
+  const pack = await omegaPolicy({});
+  assert.equal(pack.version, OMEGA_POLICY_VERSION);
+  assert.equal(pack.doctrine_sha, CANON.content_sha256);
+  assert.deepEqual(pack.values, canon.values);
+  assert.doesNotMatch(JSON.stringify(pack), /\d{4}\.\d/, "no price");
 });

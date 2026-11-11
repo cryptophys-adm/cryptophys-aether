@@ -66,6 +66,13 @@ text with a model.
 7. **Report.** Each session publishes one `knowledge_audit` report to the kernel: `info`, or `warning`
    when a rule is refused or unreported.
 
+## Omega's policy (B-12, 2026-11-11)
+
+- `KnowledgeIngress.omegaPolicy()` gives the xauusd Worker the Omega facts of the doctrine in force
+  (risk %, positions, daily loss %, spread, signal age), each within its fact's bound.
+- An amendment the council proposed and Cerebrum executed therefore reaches Omega's settings within an
+  hour, but only while the owner's switch `OMEGA_POLICY_AUTO` is on in xauusd.
+
 ## Switches
 
 - **`KNOWLEDGE_COUNCIL`** (Aether variable): `propose` (default), `observe` (review only) or `off`.
