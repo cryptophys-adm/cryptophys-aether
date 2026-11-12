@@ -109,7 +109,7 @@
     {
       "id": "decision_engine_ssot",
       "class": "operational",
-      "rule": "The Decision Engine is the single decision. At every 15m close one AI council, the only reader across the timeframes, chooses BUY, SELL or WAIT from witnesses that each judge from their own data, weighted D1 room 0.16, 4H room 0.16, 1H room 0.16, 15m room 0.12, News Daily 0.08, Macro War Room 0.04, strategy engine 0.08, key levels 0.05, regime 0.05, cross-timeframe trend 0.05, macro drivers 0.03, session 0.02; a missing or stale witness drops out and the rest renormalise. It decides inside deterministic guardrails it cannot break (market_open, fresh, quorum, no_veto, levels, reward, confidence); a BUY or SELL that breaks one becomes WAIT. Prices come only from the Key Level Agent's plan, never from a model. Its decision feeds the EA, Omega, Telegram, the Signal Ledger and Nexus.",
+      "rule": "The Decision Engine is the single decision. At every 15m close one AI council, the only reader across the timeframes, chooses BUY, SELL or WAIT from witnesses that each judge from their own data, weighted D1 room 0.1469, 4H room 0.1469, 1H room 0.1469, 15m room 0.1103, News Daily 0.0735, Macro War Room 0.0367, strategy engine 0.0735, key levels 0.0459, regime 0.0459, cross-timeframe trend 0.0459, macro drivers 0.0276, session 0.02, economic calendar inside a release's horizon 0.08; a missing or stale witness drops out and the rest renormalise. It decides inside deterministic guardrails it cannot break (market_open, fresh, quorum, no_veto, levels, reward, confidence); a BUY or SELL that breaks one becomes WAIT. Prices come only from the Key Level Agent's plan, never from a model. Its decision feeds the EA, Omega, Telegram, the Signal Ledger and Nexus.",
       "template": "The Decision Engine is the single decision. At every {decision.cadence} close one AI council, the only reader across the timeframes, chooses BUY, SELL or WAIT from witnesses that each judge from their own data, weighted {decision.witness_weights}; a missing or stale witness drops out and the rest renormalise. It decides inside deterministic guardrails it cannot break ({decision.guardrails}); a BUY or SELL that breaks one becomes WAIT. Prices come only from the Key Level Agent's plan, never from a model. Its decision feeds the EA, Omega, Telegram, the Signal Ledger and Nexus.",
       "anchors": [
         {
@@ -125,18 +125,19 @@
         {
           "fact": "decision.witness_weights",
           "value": {
-            "D1": 0.16,
-            "H4": 0.16,
-            "H1": 0.16,
-            "M15": 0.12,
-            "NEWS": 0.08,
-            "MACRO": 0.04,
-            "STRATEGY": 0.08,
-            "KEY_LEVELS": 0.05,
-            "REGIME": 0.05,
-            "TREND_TF": 0.05,
-            "MACRO_DRIVERS": 0.03,
-            "SESSION": 0.02
+            "D1": 0.1469,
+            "H4": 0.1469,
+            "H1": 0.1469,
+            "M15": 0.1103,
+            "NEWS": 0.0735,
+            "MACRO": 0.0367,
+            "STRATEGY": 0.0735,
+            "KEY_LEVELS": 0.0459,
+            "REGIME": 0.0459,
+            "TREND_TF": 0.0459,
+            "MACRO_DRIVERS": 0.0276,
+            "SESSION": 0.02,
+            "CALENDAR": 0.08
           },
           "format": "weights"
         },
@@ -154,9 +155,9 @@
           "format": "list"
         }
       ],
-      "source": "xauusd docs/SSOT.md, Decision Engine; src/decision-engine.mjs; owner decisions 2026-11-09 and 2026-11-10",
+      "source": "xauusd docs/SSOT.md, Decision Engine; src/decision-engine.mjs; owner decisions 2026-11-09 and 2026-11-10; 2026-11-12: the CALENDAR witness at 0.08 inside a release's horizon, the others scaled to make room",
       "since": "2026-11-09",
-      "updated": "2026-11-11",
+      "updated": "2026-11-12",
       "supersedes": []
     },
     {

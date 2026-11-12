@@ -57,20 +57,23 @@ export const WEIGHTING_TIMEFRAMES = Object.freeze(["15", "60", "240", "1D"]);
 export const WITNESS_REPORT_VERSION = "cryptophys.witness-weighting-report.v1";
 export const WITNESS_TIMEFRAME = "engine";
 /** Mirrors xauusd src/witness-tuning.mjs (WITNESS_KEYS, WITNESS_MIN, WITNESS_MAX); the doctrine caps a weight at 0.3. */
-export const WITNESS_KEYS = Object.freeze(["D1", "H4", "H1", "M15", "NEWS", "MACRO", "STRATEGY", "KEY_LEVELS", "REGIME", "TREND_TF", "MACRO_DRIVERS", "SESSION"]);
+export const WITNESS_KEYS = Object.freeze(["D1", "H4", "H1", "M15", "NEWS", "MACRO", "STRATEGY", "KEY_LEVELS", "REGIME", "TREND_TF", "MACRO_DRIVERS", "SESSION", "CALENDAR"]);
+/** CALENDAR (xauusd 2026-11-12: the economic calendar inside a release's horizon) may be absent from a set reported before it. */
+const OPTIONAL_WITNESSES = Object.freeze(["CALENDAR"]);
 const WITNESS_MIN = 0.02, WITNESS_MAX = 0.28;
 
-/** Pure: why a witness weight set may not be stored (empty when all 12 witnesses sit inside their bounds and sum to 1). */
+/** Pure: why a witness weight set may not be stored (empty when all 13 witnesses, or the 12 of a set from before CALENDAR, sit inside their bounds and sum to 1). */
 export function witnessWeightsProblems(w) {
   if (!isObject(w)) return ["not_an_object"];
   const out = [];
   for (const k of Object.keys(w)) if (!WITNESS_KEYS.includes(k)) out.push(`unknown_witness:${k}`);
-  for (const k of WITNESS_KEYS) {
+  const keys = WITNESS_KEYS.filter((k) => !(OPTIONAL_WITNESSES.includes(k) && !(k in w)));
+  for (const k of keys) {
     const v = w[k];
     if (typeof v !== "number" || !Number.isFinite(v)) out.push(`missing:${k}`);
     else if (v < WITNESS_MIN - 1e-9 || v > WITNESS_MAX + 1e-9) out.push(`out_of_bounds:${k}`);
   }
-  if (!out.length && Math.abs(WITNESS_KEYS.reduce((s, k) => s + w[k], 0) - 1) > 0.001) out.push("sum_not_1");
+  if (!out.length && Math.abs(keys.reduce((s, k) => s + w[k], 0) - 1) > 0.001) out.push("sum_not_1");
   return out;
 }
 
