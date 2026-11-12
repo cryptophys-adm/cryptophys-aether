@@ -7,7 +7,8 @@
 //   RPC KnowledgeIngress (Service Binding from the xauusd AI Worker, phase A5): ingestCards, canonInfo,
 //     learnedPack (phase A6: the items a person approved for shadow testing; never a live prompt; a
 //     weighting item activates the H1 quorum weighting in xauusd, owner decision 2026-11-09),
-//     ingestWeightingReport (the H1 quorum replay, src/weighting.mjs)
+//     ingestWeightingReport (the H1 quorum replay, src/weighting.mjs), ingestExecutionReport (the Signal
+//     Ledger's plan and Omega policy per trading mode, src/execution.mjs)
 //   cron :52 every hour (phase A4): canon sync into aether-canon (once per canon version), card
 //   embedding into aether-market, the review status of open knowledge proposals; at 01:52 UTC the
 //   guardian and auditor digest to the kernel; at 02:52 UTC the curator and calibrator propose (A6).
@@ -21,6 +22,7 @@ import { runDigest } from "./guardian.mjs";
 import { budgetUsed } from "./budget.mjs";
 import { runCuration, syncReviews, learnedPack, knowledgeCounts } from "./knowledge.mjs";
 import { storeWeightingReport, weightingReports } from "./weighting.mjs";
+import { storeExecutionReport } from "./execution.mjs";
 import { aetherOverview, aetherSync } from "./reader.mjs";
 import { storeFacts, syncAmendments, runCouncil, COUNCIL_HOUR_UTC, omegaPolicy } from "./doctrine.mjs";
 
@@ -39,6 +41,8 @@ export class KnowledgeIngress extends WorkerEntrypoint {
   async ingestWeightingReport(report) { return storeWeightingReport(this.env.AETHER_DB, report); }
   /** The doctrine facts (cryptophys.doctrine-facts.v1), hourly: the Nexus and Omega seats of the Knowledge Council. */
   async ingestDoctrineFacts(facts) { return storeFacts(this.env.AETHER_DB, facts); }
+  // The Signal Ledger's execution report (owner 2026-11-12): R per mode and per trade, never a price.
+  async ingestExecutionReport(report) { return storeExecutionReport(this.env.AETHER_DB, report); }
 }
 
 /**

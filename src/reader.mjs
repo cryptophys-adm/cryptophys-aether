@@ -9,6 +9,7 @@ import { indexStatus } from "./indexes.mjs";
 import { budgetUsed } from "./budget.mjs";
 import { knowledgeCounts, curationProgressOf } from "./knowledge.mjs";
 import { weightingReports } from "./weighting.mjs";
+import { latestExecutionReport, executionSummary } from "./execution.mjs";
 import { complianceFindings, COMPLIANCE_WARN_PER_100 } from "./guardian.mjs";
 import { doctrineView, effectiveSha } from "./doctrine.mjs";
 
@@ -174,6 +175,8 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
     knowledge: { counts: db ? await safe(() => knowledgeCounts(db), {}) : {}, items: knowledgeItems },
     guardian: { window_hours: 24, cards: lastDay.length, threshold_per_100: COMPLIANCE_WARN_PER_100, findings: complianceFindings(lastDay).slice(0, 30) },
     weighting,
+    // The Signal Ledger's plan and Omega policy per trading mode (owner 2026-11-12), the curator's input.
+    execution: db ? await safe(async () => executionSummary(await latestExecutionReport(db)), null) : null,
     doctrine,
     progress: {
       curation: db ? await curationProgressOf(db, { now }) : null,

@@ -12,6 +12,7 @@
 // a price, level, size or order wording. The kernel validates every item again before storing it.
 import { CANON } from "./canon.generated.mjs";
 import { latestWeightingReport, weightingCandidate, WEIGHTING_FAMILY } from "./weighting.mjs";
+import { executionCuratorCandidates } from "./execution.mjs";
 
 export const ITEM_SCHEMA = "cryptophys.knowledge-item.v1";
 export const PACK_VERSION = "cryptophys.learned-pack.v1";
@@ -93,7 +94,7 @@ export function binomialTail(k, n, p) {
   return Math.min(1, sum);
 }
 
-function baseItem({ item_id, kind, claim_type, agents, charts, situation, text, evidence, card_ids }) {
+export function baseItem({ item_id, kind, claim_type, agents, charts, situation, text, evidence, card_ids }) {
   return {
     schema: ITEM_SCHEMA, item_id, version: 1, kind, claim_type, label: "learned",
     audience: { agents, charts }, situation, text, evidence,
@@ -305,6 +306,8 @@ export async function runCuration(env, { now = Date.now() } = {}) {
   await ensureSchema(db);
   const cards = await loadCards(db, now, Math.max(ROLE_DRIFT.window_days, CAUTION.window_days, ENGINE.window_days));
   const curatorCandidates = [...roleDriftCandidates(cards, { now }), ...cautionCandidates(cards, { now })];
+  // The Signal Ledger's execution report (owner 2026-11-12, src/execution.mjs): Omega's measured gaps per mode.
+  try { curatorCandidates.push(...await executionCuratorCandidates(db, { now })); } catch { /* no report, no candidate */ }
   const proposedRows = (await db.prepare("SELECT item_json, status FROM knowledge_items WHERE kind = 'param_candidate'").all()).results || [];
   const proposed = new Set(), pendingFamilies = new Set(), proposedIds = new Set();
   for (const r of proposedRows) {
