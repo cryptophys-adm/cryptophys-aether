@@ -198,8 +198,8 @@
     {
       "id": "confirmation_required",
       "class": "operational",
-      "rule": "The rooms decide by their own quorum, without a confirmation gate, and so does the Decision Engine (its confirmation gate is off): the confirmation candle is the trigger of a market order (prophet_candle_for_market_orders). A market order waits for a verified 5m or a 15m Prophet confirmation on its side, the one the decision recorded or one printed since; a limit order at the key level waits only for price. A 5m confirmation counts only while the 5m Prophet implementation is parity-approved.",
-      "template": "The rooms decide by their own quorum, without a confirmation gate, and so does the Decision Engine (its confirmation gate is {decision.confirmation_required}): the confirmation candle is the trigger of a market order ({decision.execution_trigger}). A market order waits for a verified 5m or a 15m Prophet confirmation on its side, the one the decision recorded or one printed since; a limit order at the key level waits only for price. A 5m confirmation counts only while the 5m Prophet implementation is parity-approved.",
+      "rule": "The rooms decide by their own quorum, without a confirmation gate, and so does the Decision Engine (its confirmation gate is off): the confirmation candle is the trigger of a market order (prophet_candle_for_market_orders_broker_5m). A market order waits for a broker 5m Prophet confirmation on its side within 3 broker 5m bars after the decision, once the broker's 5m lane is ready and fresh; until then, or while it is stale, a verified 5m or a 15m Prophet confirmation on its side, the one the decision recorded or one printed since. A TradingView 5m confirmation counts only while the 5m Prophet implementation is parity-approved; the broker's 5m is not parity-verified (its bars differ from OANDA's by the basis). A limit order at the key level waits only for price.",
+      "template": "The rooms decide by their own quorum, without a confirmation gate, and so does the Decision Engine (its confirmation gate is {decision.confirmation_required}): the confirmation candle is the trigger of a market order ({decision.execution_trigger}). A market order waits for a broker 5m Prophet confirmation on its side within 3 broker 5m bars after the decision, once the broker's 5m lane is ready and fresh; until then, or while it is stale, a verified 5m or a 15m Prophet confirmation on its side, the one the decision recorded or one printed since. A TradingView 5m confirmation counts only while the 5m Prophet implementation is parity-approved; the broker's 5m is not parity-verified (its bars differ from OANDA's by the basis). A limit order at the key level waits only for price.",
       "anchors": [
         {
           "fact": "decision.confirmation_required",
@@ -208,16 +208,16 @@
         },
         {
           "fact": "decision.execution_trigger",
-          "value": "prophet_candle_for_market_orders",
+          "value": "prophet_candle_for_market_orders_broker_5m",
           "format": "text"
         }
       ],
-      "source": "xauusd src/decision-engine.mjs (entry_trigger per side), src/ea-signal.mjs (entryTriggerFor), verifiedM5Confirmation; owner 2026-11-11: the confirmation candle is the entry trigger; supersedes no_confirmation_no_entry",
+      "source": "xauusd src/decision-engine.mjs (entry_trigger per side), src/ea-signal.mjs (entryTriggerFor), verifiedM5Confirmation, src/broker-trigger.mjs; owner 2026-11-11: the confirmation candle is the entry trigger; supersedes no_confirmation_no_entry; owner 2026-11-12: the broker's 5m times market orders within 3 bars (docs/RFC_OMEGA_5M_EXECUTION.md)",
       "since": "2026-11-11",
       "supersedes": [
         "no_confirmation_no_entry"
       ],
-      "updated": "2026-11-11"
+      "updated": "2026-11-12"
     },
     {
       "id": "h1_quorum",
