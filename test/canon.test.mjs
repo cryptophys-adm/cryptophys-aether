@@ -14,7 +14,7 @@ test("the canon has its four parts and a content hash over every file", () => {
   assert.match(c.content_sha256, /^[a-f0-9]{64}$/);
   assert.equal(CANON.content_sha256, c.content_sha256);
   assert.equal(c.indicator.kb_version, 4);
-  assert.equal(c.indicator.kb_content_sha256, "0e23c15b9c1d044638441aca1c82af119b46f0fbd43cca194c75a07f907e245e", "KB v4 is imported as is (xauusd 2026-11-09: the room quorum, its automatic weighting per timeframe and regime), pinned by its hash");
+  assert.equal(c.indicator.kb_content_sha256, "991a5ab9f6b553eeac179c25f4c881d9a8d3e1117938ef5d9614d3836788b353", "KB v4 is imported as is (xauusd #278, 2026-11-12: Prophet's ruthless cut loss is against a long and for a short), pinned by its hash");
 });
 
 test("the doctrine carries the owner rules the guardian checks, each with a source", () => {
