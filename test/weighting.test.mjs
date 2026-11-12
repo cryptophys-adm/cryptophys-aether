@@ -161,6 +161,12 @@ test("the Decision Engine's witness-weighting report (timeframe engine) is check
   assert.deepEqual(witnessWeightsProblems(up), []);
   assert.match(witnessWeightsProblems({ ...B11, D1: 0.3, H4: 0.02 }).join(), /out_of_bounds:D1/);
   assert.match(witnessWeightsProblems({ ...B11, D1: 0.2 }).join(), /sum_not_1/);
+  // xauusd 2026-11-12: the CALENDAR witness (0.08 inside a release's horizon), the others scaled to make room.
+  const withCalendar = { D1: 0.1469, H4: 0.1469, H1: 0.1469, M15: 0.1103, NEWS: 0.0735, MACRO: 0.0367, STRATEGY: 0.0735, KEY_LEVELS: 0.0459, REGIME: 0.0459, TREND_TF: 0.0459, MACRO_DRIVERS: 0.0276, SESSION: 0.02, CALENDAR: 0.08 };
+  assert.deepEqual(witnessWeightsProblems(withCalendar), []);
+  assert.match(witnessWeightsProblems({ ...B11, CALENDAR: 0.08 }).join(), /sum_not_1/, "with CALENDAR the set must still sum to 1");
+  assert.match(witnessWeightsProblems({ ...withCalendar, CALENDAR: 0.4 }).join(), /out_of_bounds:CALENDAR/);
+  assert.deepEqual(reportProblems({ ...witness, active: { ...witness.active, params: withCalendar } }), []);
   assert.deepEqual(reportProblems(witness), []);
   assert.ok(reportProblems({ ...witness, timeframe: "60" }).includes("timeframe_invalid"));
   assert.ok(reportProblems({ ...witness, active: { ...witness.active, params: DEFAULT } }).includes("active_invalid"), "a room grid point is not a witness set");

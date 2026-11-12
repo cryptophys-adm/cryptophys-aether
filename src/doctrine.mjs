@@ -57,7 +57,8 @@ export const DOCTRINE_BOUNDS = Object.freeze({
 
 const WITNESS_WORD = Object.freeze({
   D1: "D1 room", H4: "4H room", H1: "1H room", M15: "15m room", NEWS: "News Daily", MACRO: "Macro War Room", STRATEGY: "strategy engine",
-  KEY_LEVELS: "key levels", REGIME: "regime", TREND_TF: "cross-timeframe trend", MACRO_DRIVERS: "macro drivers", SESSION: "session"
+  KEY_LEVELS: "key levels", REGIME: "regime", TREND_TF: "cross-timeframe trend", MACRO_DRIVERS: "macro drivers", SESSION: "session",
+  CALENDAR: "economic calendar inside a release's horizon"
 });
 const TOKEN = /\{([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)\}/g;
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
