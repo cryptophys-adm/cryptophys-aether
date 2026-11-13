@@ -7,6 +7,11 @@
 //
 // Aether keeps the latest report as knowledge and shows it on its page (src/reader.mjs). It proposes
 // nothing from it yet: a model only advises until xauusd's verdict and the owner promote it.
+//
+// Since 2026-11-13 (owner: "lanjutkan perluas model report gbm ke Aether") the report may also carry
+// `gbm`: xauusd's daily decision model (LightGBM, trained by GitHub Actions; xauusd src/model-gbm.mjs),
+// shadow only. Its walk-forward checks, its prospective record and the features it split on (by gain);
+// never a tree, a threshold or a leaf value.
 
 export const MODEL_REPORT_SCHEMA = "cryptophys.model-report.v1";
 export const MODEL_IDS = Object.freeze(["tight_long", "tight_short", "wide_long", "wide_short"]);
@@ -28,13 +33,36 @@ function forbidden(value, path = "report") {
   return Object.entries(value).flatMap(([k, v]) => [...(FORBIDDEN.has(k) ? [`${path}.${k}`] : []), ...forbidden(v, `${path}.${k}`)]);
 }
 
-function scoresProblems(scores, path) {
+function scoresProblems(scores, path, importance = "weight") {
   if (!isObject(scores)) return [`${path}_invalid`];
   const out = [];
   for (const [k, v] of Object.entries(scores)) {
     if (k === "top_features") {
-      if (!Array.isArray(v) || v.length > 20 || v.some((f) => !isObject(f) || !FEATURE.test(String(f.feature)) || !score(f.weight) || Object.keys(f).some((x) => x !== "feature" && x !== "weight"))) out.push(`${path}.top_features_invalid`);
+      if (!Array.isArray(v) || v.length > 20 || v.some((f) => !isObject(f) || !FEATURE.test(String(f.feature)) || !score(f[importance]) || Object.keys(f).some((x) => x !== "feature" && x !== importance))) out.push(`${path}.top_features_invalid`);
     } else if (!SCORE_KEYS.includes(k) || !score(v)) out.push(`${path}.${k}_invalid`);
+  }
+  return out;
+}
+
+const GBM_STATUS = Object.freeze(["ok", "not_enough_rows"]);
+
+/** Pure: the problems of a report's optional `gbm` block (the daily decision model, shadow only). */
+function gbmProblems(g) {
+  if (g == null) return [];
+  if (!isObject(g)) return ["gbm_invalid"];
+  const out = [];
+  const allowed = new Set(["model_id", "trained_at", "rows", "features", "status", "walk_forward", "prospective", "connected"]);
+  for (const k of Object.keys(g)) if (!allowed.has(k)) out.push(`gbm.${k}_unexpected`);
+  if (typeof g.model_id !== "string" || !/^gbm@[0-9T:\-]{16,20}Z$/.test(g.model_id)) out.push("gbm.model_id_invalid");
+  if (!Number.isFinite(Date.parse(g.trained_at))) out.push("gbm.trained_at_invalid");
+  if (!Number.isInteger(g.rows) || g.rows < 0) out.push("gbm.rows_invalid");
+  if (!Number.isInteger(g.features) || g.features < 0) out.push("gbm.features_invalid");
+  if (!GBM_STATUS.includes(g.status)) out.push("gbm.status_invalid");
+  if (g.connected !== false) out.push("gbm.connected_invalid");
+  for (const part of ["walk_forward", "prospective"]) {
+    const v = g[part];
+    if (!isObject(v) || Object.keys(v).some((id) => !MODEL_IDS.includes(id))) { out.push(`gbm.${part}_invalid`); continue; }
+    for (const [id, s] of Object.entries(v)) out.push(...scoresProblems(s, `gbm.${part}.${id}`, "gain"));
   }
   return out;
 }
@@ -61,6 +89,7 @@ export function modelReportProblems(report) {
   if (notes != null && (!Array.isArray(notes) || notes.length > 20 || notes.some((n) => !isObject(n) || typeof n.item_id !== "string" || !/^[a-z0-9][a-z0-9_.:-]{2,95}$/.test(n.item_id)
     || !Number.isInteger(n.version) || !NOTE_STATUS.includes(n.status) || !Array.isArray(n.agents) || n.agents.length > 8 || n.agents.some((a) => !AGENT.test(String(a)))
     || !(n.chart == null || ["15", "60", "240", "1D"].includes(n.chart)) || !iso(n.promoted_at) || !iso(n.retired_at) || !text(n.reason, 300) || "text" in n))) out.push("live_notes_invalid");
+  out.push(...gbmProblems(report.gbm));
   for (const k of forbidden(report)) out.push(`forbidden_key:${k}`);
   if (new TextEncoder().encode(JSON.stringify(report)).byteLength > MAX_REPORT_BYTES) out.push("too_large");
   return out;
@@ -101,19 +130,23 @@ export async function latestModelReport(db) {
   try { return { report: JSON.parse(row.report_json), received_at: row.received_at }; } catch { return null; }
 }
 
+/** Pure: per model id its walk-forward and prospective scores and its top features (names only). */
+function modelRows(walkForward, prospective) {
+  return MODEL_IDS.filter((id) => walkForward?.[id] || prospective?.[id]).map((id) => {
+    const w = walkForward?.[id] || null, p = prospective?.[id] || null;
+    return {
+      id, walk_forward: w ? { n: w.n, skill: w.skill, auc: w.auc, picked: w.picked, picked_mean_r: w.picked_mean_r, all_mean_r: w.all_mean_r } : null,
+      prospective: p ? { n: p.n, skill: p.skill, auc: p.auc, picked: p.picked, picked_mean_r: p.picked_mean_r, all_mean_r: p.all_mean_r, p_value: p.p_value ?? null } : null,
+      top_features: (w?.top_features || []).slice(0, 6).map((f) => f.feature)
+    };
+  });
+}
+
 /** Pure: what the Aether page shows: per model its walk-forward and prospective skill and its top features. */
 export function modelSummary(latest) {
   if (!latest?.report) return null;
   const r = latest.report;
-  const models = MODEL_IDS.filter((id) => r.walk_forward[id] || r.prospective[id]).map((id) => {
-    const w = r.walk_forward[id] || null, p = r.prospective[id] || null;
-    return {
-      id, walk_forward: w ? { n: w.n, skill: w.skill, auc: w.auc, picked: w.picked, picked_mean_r: w.picked_mean_r, all_mean_r: w.all_mean_r } : null,
-      prospective: p ? { n: p.n, skill: p.skill, auc: p.auc, picked: p.picked, picked_mean_r: p.picked_mean_r, all_mean_r: p.all_mean_r } : null,
-      top_features: (w?.top_features || []).slice(0, 6).map((f) => f.feature)
-    };
-  });
-  const models_prospective = (id) => r.prospective?.[id] ?? null;
-  for (const m of models) { const p = models_prospective(m.id); if (m.prospective && p) m.prospective.p_value = p.p_value ?? null; }
-  return { model_id: r.model_id, generated_at: r.generated_at, received_at: latest.received_at, rows: r.rows, models, promotion: r.promotion ?? null, gate: r.gate ?? null, live_notes: r.live_notes ?? [] };
+  const g = r.gbm;
+  const gbm = g ? { model_id: g.model_id, trained_at: g.trained_at, rows: g.rows, features: g.features, status: g.status, connected: false, models: modelRows(g.walk_forward, g.prospective) } : null;
+  return { model_id: r.model_id, generated_at: r.generated_at, received_at: latest.received_at, rows: r.rows, models: modelRows(r.walk_forward, r.prospective), promotion: r.promotion ?? null, gate: r.gate ?? null, live_notes: r.live_notes ?? [], gbm };
 }
