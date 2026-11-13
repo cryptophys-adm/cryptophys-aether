@@ -10,6 +10,7 @@ import { budgetUsed } from "./budget.mjs";
 import { knowledgeCounts, curationProgressOf } from "./knowledge.mjs";
 import { weightingReports } from "./weighting.mjs";
 import { latestExecutionReport, executionSummary } from "./execution.mjs";
+import { latestModelReport, modelSummary } from "./model.mjs";
 import { complianceFindings, COMPLIANCE_WARN_PER_100 } from "./guardian.mjs";
 import { doctrineView, effectiveSha } from "./doctrine.mjs";
 
@@ -177,6 +178,8 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
     weighting,
     // The Signal Ledger's plan and Omega policy per trading mode (owner 2026-11-12), the curator's input.
     execution: db ? await safe(async () => executionSummary(await latestExecutionReport(db)), null) : null,
+    // xauusd's self-trained baseline model (owner 2026-11-13): what it learned and how it did.
+    model: db ? await safe(async () => modelSummary(await latestModelReport(db)), null) : null,
     doctrine,
     progress: {
       curation: db ? await curationProgressOf(db, { now }) : null,
