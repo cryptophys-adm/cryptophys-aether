@@ -57,12 +57,16 @@ export const WEIGHTING_TIMEFRAMES = Object.freeze(["15", "60", "240", "1D"]);
 export const WITNESS_REPORT_VERSION = "cryptophys.witness-weighting-report.v1";
 export const WITNESS_TIMEFRAME = "engine";
 /** Mirrors xauusd src/witness-tuning.mjs (WITNESS_KEYS, WITNESS_MIN, WITNESS_MAX); the doctrine caps a weight at 0.3. */
-export const WITNESS_KEYS = Object.freeze(["D1", "H4", "H1", "M15", "NEWS", "MACRO", "STRATEGY", "KEY_LEVELS", "REGIME", "TREND_TF", "MACRO_DRIVERS", "SESSION", "CALENDAR"]);
-/** CALENDAR (xauusd 2026-11-12: the economic calendar inside a release's horizon) may be absent from a set reported before it. */
-const OPTIONAL_WITNESSES = Object.freeze(["CALENDAR"]);
+export const WITNESS_KEYS = Object.freeze(["D1", "H4", "H1", "M15", "NEWS", "MACRO", "STRATEGY", "KEY_LEVELS", "REGIME", "TREND_TF", "MACRO_DRIVERS", "SESSION", "CALENDAR", "STRATEGY_AGENTS"]);
+/**
+ * CALENDAR (xauusd 2026-11-12: the economic calendar inside a release's horizon) and STRATEGY_AGENTS
+ * (xauusd 2026-11-13: the strategy agents' consensus, on par with a timeframe room) may be absent from a
+ * set reported before them.
+ */
+const OPTIONAL_WITNESSES = Object.freeze(["CALENDAR", "STRATEGY_AGENTS"]);
 const WITNESS_MIN = 0.02, WITNESS_MAX = 0.28;
 
-/** Pure: why a witness weight set may not be stored (empty when all 13 witnesses, or the 12 of a set from before CALENDAR, sit inside their bounds and sum to 1). */
+/** Pure: why a witness weight set may not be stored (empty when all 14 witnesses, or those of a set from before CALENDAR or STRATEGY_AGENTS, sit inside their bounds and sum to 1). */
 export function witnessWeightsProblems(w) {
   if (!isObject(w)) return ["not_an_object"];
   const out = [];
