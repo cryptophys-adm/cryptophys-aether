@@ -12,7 +12,12 @@ export const MODEL_REPORT_SCHEMA = "cryptophys.model-report.v1";
 export const MODEL_IDS = Object.freeze(["tight_long", "tight_short", "wide_long", "wide_short"]);
 const MAX_REPORT_BYTES = 64 * 1024;
 const FEATURE = /^[a-z0-9_]{1,64}$/;
-const SCORE_KEYS = Object.freeze(["n", "train", "hit_rate", "brier", "brier_base", "skill", "auc", "picked", "picked_hit_rate", "picked_mean_r", "all_mean_r"]);
+const SCORE_KEYS = Object.freeze(["n", "train", "hit_rate", "brier", "brier_base", "skill", "p_value", "auc", "picked", "picked_hit_rate", "picked_mean_r", "all_mean_r"]);
+const PROMOTION_STATUS = Object.freeze(["promoted", "not_promoted"]);
+const NOTE_STATUS = Object.freeze(["live", "retired"]);
+const AGENT = /^[a-z0-9][a-z0-9_-]{1,39}$/;
+const iso = (v) => v === null || v === undefined || Number.isFinite(Date.parse(v));
+const text = (v, max) => v === null || v === undefined || (typeof v === "string" && v.length <= max);
 const FORBIDDEN = new Set(["entry", "entry_price", "stop", "stop_loss", "take_profit", "tp", "tp1", "tp2", "price", "prices", "level", "levels", "key_levels", "zones", "lots", "volume", "size_lots", "balance", "equity", "profit", "money", "weights", "scale", "bias"]);
 const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 const score = (v) => v === null || (typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 1e6);
@@ -47,6 +52,15 @@ export function modelReportProblems(report) {
     if (!isObject(v) || Object.keys(v).some((id) => !MODEL_IDS.includes(id))) { out.push(`${part}_invalid`); continue; }
     for (const [id, s] of Object.entries(v)) out.push(...scoresProblems(s, `${part}.${id}`));
   }
+  // Since 2026-11-13 (owner: "Pastikan Modul training ini punya visualisasi di cerebrum"): whether the model is
+  // connected to the council, the gate's rules, and the learned notes xauusd put live by itself. Optional.
+  const pr = report.promotion;
+  if (pr != null && (!isObject(pr) || !PROMOTION_STATUS.includes(pr.status) || !(pr.set == null || ["tight", "wide"].includes(pr.set)) || !text(pr.reason, 400) || !iso(pr.since))) out.push("promotion_invalid");
+  if (report.gate != null && (!isObject(report.gate) || Object.values(report.gate).some((v) => !score(v)))) out.push("gate_invalid");
+  const notes = report.live_notes;
+  if (notes != null && (!Array.isArray(notes) || notes.length > 20 || notes.some((n) => !isObject(n) || typeof n.item_id !== "string" || !/^[a-z0-9][a-z0-9_.:-]{2,95}$/.test(n.item_id)
+    || !Number.isInteger(n.version) || !NOTE_STATUS.includes(n.status) || !Array.isArray(n.agents) || n.agents.length > 8 || n.agents.some((a) => !AGENT.test(String(a)))
+    || !(n.chart == null || ["15", "60", "240", "1D"].includes(n.chart)) || !iso(n.promoted_at) || !iso(n.retired_at) || !text(n.reason, 300) || "text" in n))) out.push("live_notes_invalid");
   for (const k of forbidden(report)) out.push(`forbidden_key:${k}`);
   if (new TextEncoder().encode(JSON.stringify(report)).byteLength > MAX_REPORT_BYTES) out.push("too_large");
   return out;
@@ -99,5 +113,7 @@ export function modelSummary(latest) {
       top_features: (w?.top_features || []).slice(0, 6).map((f) => f.feature)
     };
   });
-  return { model_id: r.model_id, generated_at: r.generated_at, received_at: latest.received_at, rows: r.rows, models };
+  const models_prospective = (id) => r.prospective?.[id] ?? null;
+  for (const m of models) { const p = models_prospective(m.id); if (m.prospective && p) m.prospective.p_value = p.p_value ?? null; }
+  return { model_id: r.model_id, generated_at: r.generated_at, received_at: latest.received_at, rows: r.rows, models, promotion: r.promotion ?? null, gate: r.gate ?? null, live_notes: r.live_notes ?? [] };
 }

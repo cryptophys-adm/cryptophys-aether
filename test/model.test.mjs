@@ -59,3 +59,24 @@ test("M2. the latest report is kept and the Aether page shows each model's skill
   const overview = await aetherOverview({ AETHER_DB: db });
   assert.equal(overview.model.model_id, "baseline@2026-11-13T02:00Z");
 });
+
+test("M3. the gate state, its rules and the live notes are kept for Cerebrum; a note's text or a bad state is refused", async () => {
+  resetModelSchemaCacheForTests();
+  const db = d1();
+  const report = { ...structuredClone(REPORT), promotion: { status: "not_promoted", set: null, reason: "tight: long: 120 of 300 decisions", since: null }, gate: { min_n: 300, alpha: 0.05, min_auc: 0.55 },
+    live_notes: [{ item_id: "k-role-risk-calibration-talk", version: 1, status: "live", agents: ["risk"], chart: "60", promoted_at: "2026-11-20T01:00:00.000Z", retired_at: null, reason: null }] };
+  report.prospective.tight_long.p_value = 0.004;
+  assert.deepEqual(modelReportProblems(report), []);
+  assert.ok(modelReportProblems({ ...report, promotion: { status: "maybe" } }).includes("promotion_invalid"));
+  assert.ok(modelReportProblems({ ...report, live_notes: [{ ...report.live_notes[0], text: "a note" }] }).includes("live_notes_invalid"));
+  assert.ok(modelReportProblems({ ...report, live_notes: [{ ...report.live_notes[0], agents: ["Risk Manager"] }] }).includes("live_notes_invalid"));
+  await storeModelReport(db, report);
+  const s = modelSummary(await latestModelReport(db));
+  assert.equal(s.promotion.status, "not_promoted");
+  assert.equal(s.gate.min_n, 300);
+  assert.equal(s.live_notes[0].agents[0], "risk");
+  assert.equal(s.models[0].prospective.p_value, 0.004);
+  // An older report without them still reads.
+  await storeModelReport(db, structuredClone(REPORT));
+  assert.deepEqual(modelSummary(await latestModelReport(db)).live_notes, []);
+});
