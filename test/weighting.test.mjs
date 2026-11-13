@@ -167,6 +167,14 @@ test("the Decision Engine's witness-weighting report (timeframe engine) is check
   assert.match(witnessWeightsProblems({ ...B11, CALENDAR: 0.08 }).join(), /sum_not_1/, "with CALENDAR the set must still sum to 1");
   assert.match(witnessWeightsProblems({ ...withCalendar, CALENDAR: 0.4 }).join(), /out_of_bounds:CALENDAR/);
   assert.deepEqual(reportProblems({ ...witness, active: { ...witness.active, params: withCalendar } }), []);
+  // xauusd 2026-11-13: the strategy agents' consensus, a witness on par with a timeframe room; the others scaled to make room.
+  const withAgents = { D1: 0.1263, H4: 0.1263, H1: 0.1263, M15: 0.0947, NEWS: 0.0632, MACRO: 0.0315, STRATEGY: 0.0632, KEY_LEVELS: 0.0395, REGIME: 0.0395, TREND_TF: 0.0395, MACRO_DRIVERS: 0.0237, SESSION: 0.02, CALENDAR: 0.08, STRATEGY_AGENTS: 0.1263 };
+  assert.deepEqual(witnessWeightsProblems(withAgents), []);
+  assert.equal(withAgents.STRATEGY_AGENTS, withAgents.H1, "on par with a timeframe room");
+  assert.match(witnessWeightsProblems({ ...withCalendar, STRATEGY_AGENTS: 0.1263 }).join(), /sum_not_1/, "with the strategy agents the set must still sum to 1");
+  assert.match(witnessWeightsProblems({ ...withAgents, STRATEGY_AGENTS: 0.4 }).join(), /out_of_bounds:STRATEGY_AGENTS/);
+  assert.deepEqual(witnessWeightsProblems(withCalendar), [], "a set reported before the strategy agents still passes");
+  assert.deepEqual(reportProblems({ ...witness, active: { ...witness.active, params: withAgents } }), []);
   assert.deepEqual(reportProblems(witness), []);
   assert.ok(reportProblems({ ...witness, timeframe: "60" }).includes("timeframe_invalid"));
   assert.ok(reportProblems({ ...witness, active: { ...witness.active, params: DEFAULT } }).includes("active_invalid"), "a room grid point is not a witness set");
