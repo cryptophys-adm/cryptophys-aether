@@ -80,3 +80,29 @@ test("M3. the gate state, its rules and the live notes are kept for Cerebrum; a 
   await storeModelReport(db, structuredClone(REPORT));
   assert.deepEqual(modelSummary(await latestModelReport(db)).live_notes, []);
 });
+
+test("M4. the daily decision model (gbm) rides in the report, shadow only; trees, a connection or a bad id are refused", async () => {
+  resetModelSchemaCacheForTests();
+  const db = d1();
+  const gbm = {
+    model_id: "gbm@2026-11-13T04:22Z", trained_at: "2026-11-13T04:22:00.000Z", rows: 317, features: 87, status: "ok", connected: false,
+    walk_forward: { tight_long: { train: 205, n: 88, hit_rate: 0.33, brier: 0.2, brier_base: 0.21, skill: 0.0591, auc: 0.6824, picked: 18, picked_mean_r: 0.3889, all_mean_r: -0.2614, top_features: [{ feature: "w_h1_lean", gain: 12.5 }] } },
+    prospective: { tight_long: { n: 4, brier: 0.2, brier_base: 0.22, skill: 0.09, p_value: 0.4, auc: 0.6, picked: 1, picked_mean_r: 1.5, all_mean_r: 0.1 } }
+  };
+  const report = { ...structuredClone(REPORT), gbm };
+  assert.deepEqual(modelReportProblems(report), []);
+  assert.ok(modelReportProblems({ ...report, gbm: { ...gbm, trees: [[0, 1, 0, 0, 0.1, -0.1]] } }).includes("gbm.trees_unexpected"));
+  assert.ok(modelReportProblems({ ...report, gbm: { ...gbm, connected: true } }).includes("gbm.connected_invalid"));
+  assert.ok(modelReportProblems({ ...report, gbm: { ...gbm, model_id: "baseline@2026-11-13T04:22Z" } }).includes("gbm.model_id_invalid"));
+  assert.ok(modelReportProblems({ ...report, gbm: { ...gbm, walk_forward: { tight_long: { ...gbm.walk_forward.tight_long, top_features: [{ feature: "w_h1_lean", weight: 1 }] } } } }).includes("gbm.walk_forward.tight_long.top_features_invalid"));
+  await storeModelReport(db, report);
+  const s = modelSummary(await latestModelReport(db));
+  assert.equal(s.gbm.model_id, "gbm@2026-11-13T04:22Z");
+  assert.equal(s.gbm.connected, false);
+  assert.equal(s.gbm.models[0].walk_forward.auc, 0.6824);
+  assert.deepEqual(s.gbm.models[0].top_features, ["w_h1_lean"]);
+  assert.equal(s.gbm.models[0].prospective.p_value, 0.4);
+  // A report without it reads as before.
+  await storeModelReport(db, structuredClone(REPORT));
+  assert.equal(modelSummary(await latestModelReport(db)).gbm, null);
+});
