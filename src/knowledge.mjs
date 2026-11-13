@@ -333,19 +333,42 @@ export async function runCuration(env, { now = Date.now() } = {}) {
   return { status: "ok", cards: cards.length, candidates: { curator: curatorCandidates.length, calibrator: calibratorCandidates.length }, curator, calibrator };
 }
 
-/** The approved learned pack (RFC §7.3): what xauusd may test in shadow. Never live, never canon. */
+/** Text kinds xauusd can test in shadow by itself (its shadow knowledge arm). */
+export const AUTO_SHADOW_KINDS = Object.freeze(["caution", "role_reminder"]);
+/**
+ * Autonomous shadow testing (owner 2026-11-13: "Apakah menyambungkan ini masih manual? Jika iya, buat agar
+ * autonomous"): a text proposal no person has decided yet (pending, or expired without a decision) goes
+ * into the pack for shadow testing too, marked review "auto". A rejection still removes it at once; a
+ * parameter or weighting item still needs a person (an approved weighting item activates in xauusd).
+ * Switch: KNOWLEDGE_AUTO_SHADOW = "on" (default) | "off" (approved items only, as before).
+ */
+export function autoShadowEnabled(env) { return String(env?.KNOWLEDGE_AUTO_SHADOW ?? "on").trim().toLowerCase() !== "off"; }
+
+/** The learned pack (RFC §7.3): what xauusd may test in shadow. Never canon. */
 export async function learnedPack(env) {
   const db = env.AETHER_DB;
   await ensureSchema(db);
-  const rows = (await db.prepare("SELECT item_json, content_sha256, proposal_id FROM knowledge_items WHERE status = 'approved' ORDER BY item_id, version").all()).results || [];
+  const auto = autoShadowEnabled(env);
+  const kinds = AUTO_SHADOW_KINDS.map((k) => `'${k}'`).join(", ");
+  const sql = auto
+    ? `SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status = 'approved' OR (status IN ('pending', 'expired') AND kind IN (${kinds})) ORDER BY item_id, version`
+    : "SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status = 'approved' ORDER BY item_id, version";
+  const all = (await db.prepare(sql).all()).results || [];
+  // One version per item: the approved one, else the newest undecided one.
+  const byId = new Map();
+  for (const r of all) {
+    const prev = byId.get(r.item_id);
+    if (!prev || (r.status === "approved" && prev.status !== "approved") || (r.status === prev.status && Number(r.version) > Number(prev.version)) || (prev.status !== "approved" && r.status !== "approved" && Number(r.version) > Number(prev.version))) byId.set(r.item_id, r);
+  }
+  const rows = [...byId.values()];
   const items = rows.map((r) => {
     const it = JSON.parse(r.item_json);
-    return { item_id: it.item_id, version: it.version, kind: it.kind, label: "learned", audience: it.audience, situation: it.situation, text: it.text, params: it.params ?? null, content_sha256: r.content_sha256, proposal_id: r.proposal_id };
+    return { item_id: it.item_id, version: it.version, kind: it.kind, label: "learned", audience: it.audience, situation: it.situation, text: it.text, params: it.params ?? null, content_sha256: r.content_sha256, proposal_id: r.proposal_id, review: r.status === "approved" ? "approved" : "auto" };
   });
   const body = JSON.stringify(items);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
   const sha = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return { version: PACK_VERSION, sha256: sha, canon: { version: CANON.version, content_sha256: CANON.content_sha256 }, use: "shadow testing only; never a live prompt", items };
+  return { version: PACK_VERSION, sha256: sha, canon: { version: CANON.version, content_sha256: CANON.content_sha256 }, use: "shadow testing; xauusd promotes an item only on its own shadow verdict (better than active, Holm-adjusted, holdout no worse)", items };
 }
 
 /** Counts per status, for /health. */

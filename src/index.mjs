@@ -5,7 +5,8 @@
 //   RPC AetherReader (Service Binding from the Nexus Worker): overview, read-only, for the Aether page
 //     at nexus.cryptophys.work/aether (src/reader.mjs)
 //   RPC KnowledgeIngress (Service Binding from the xauusd AI Worker, phase A5): ingestCards, canonInfo,
-//     learnedPack (phase A6: the items a person approved for shadow testing; never a live prompt; a
+//     learnedPack (phase A6: the items a person approved, and since 2026-11-13 the undecided text items, for
+//     xauusd's shadow testing; xauusd activates one only on its own shadow verdict; a
 //     weighting item activates the H1 quorum weighting in xauusd, owner decision 2026-11-09),
 //     ingestWeightingReport (the H1 quorum replay, src/weighting.mjs), ingestExecutionReport (the Signal
 //     Ledger's plan and Omega policy per trading mode, src/execution.mjs), ingestModelReport (xauusd's

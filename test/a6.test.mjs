@@ -153,7 +153,10 @@ test("reviews come back through knowledge.status; approved items form the learne
   const k = kernel();
   const env = { AETHER_DB: db, AGENTS: k };
   await runCuration(env, { now: NOW });
-  assert.equal((await learnedPack(env)).items.length, 0, "nothing is in the pack before a person approves");
+  assert.equal((await learnedPack({ ...env, KNOWLEDGE_AUTO_SHADOW: "off" })).items.length, 0, "with autonomous shadow testing off, nothing is in the pack before a person approves");
+  // Owner 2026-11-13 ("buat agar autonomous"): an undecided text proposal is shadow-tested by itself; a parameter is not.
+  const auto = await learnedPack(env);
+  assert.deepEqual(auto.items.map((it) => [it.kind, it.review]), [["role_reminder", "auto"]]);
   k.proposals[0].status = "approved"; k.proposals[0].decided_by = "owner@example.com";
   k.proposals[1].status = "rejected"; k.proposals[1].reason = "too early";
   assert.deepEqual(await syncReviews(env, { now: NOW + H }), { status: "ok", approved: 1, rejected: 1, expired: 0 });
@@ -161,8 +164,9 @@ test("reviews come back through knowledge.status; approved items form the learne
   const pack = await learnedPack(env);
   assert.equal(pack.version, "cryptophys.learned-pack.v1");
   assert.match(pack.sha256, /^[0-9a-f]{64}$/);
-  assert.equal(pack.use, "shadow testing only; never a live prompt");
+  assert.match(pack.use, /^shadow testing; xauusd promotes an item only on its own shadow verdict/);
   assert.equal(pack.items.length, 1);
+  assert.equal(pack.items[0].review, "approved");
   assert.equal(pack.items[0].label, "learned");
   assert.equal(pack.items[0].item_id, k.proposals[0].item_id);
   assert.equal(JSON.stringify(pack).includes("card_ids"), false, "the pack carries the item, not the evidence trail");
@@ -216,4 +220,19 @@ test("curation progress: each rule's have-versus-need, and ready exactly when th
   assert.equal(gmi.ready, true);
   assert.equal(e.families.find((f) => f.family === "prophet_r37").ready, false);
   assert.doesNotMatch(JSON.stringify(p), /entry_price|stop_loss|take_profit/);
+});
+
+test("autonomous shadow testing: an undecided text item stays in the pack, a rejection removes it, one version per item", async () => {
+  resetKnowledgeSchemaCacheForTests();
+  const db = d1();
+  const env = { AETHER_DB: db };
+  await learnedPack(env); // creates the schema
+  const put = (id, version, kind, status) => db.raw.prepare("INSERT INTO knowledge_items (item_id, version, kind, agent_id, item_json, status, proposal_id, content_sha256, detail, created_at, updated_at) VALUES (?, ?, ?, 'aether-curator', ?, ?, ?, NULL, NULL, '2026-11-13T00:00:00Z', '2026-11-13T00:00:00Z')")
+    .run(id, version, kind, JSON.stringify({ item_id: id, version, kind, audience: { agents: ["risk"], charts: ["60"] }, text: `${id} v${version}` }), status, `p-${id}-${version}`);
+  put("k-a", 1, "caution", "expired"); put("k-a", 2, "caution", "pending");
+  put("k-b", 1, "role_reminder", "rejected");
+  put("k-c", 1, "caution", "approved"); put("k-c", 2, "caution", "pending");
+  put("k-p", 1, "param_candidate", "pending");
+  const pack = await learnedPack(env);
+  assert.deepEqual(pack.items.map((it) => [it.item_id, it.version, it.review]), [["k-a", 2, "auto"], ["k-c", 1, "approved"]]);
 });
