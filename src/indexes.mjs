@@ -5,7 +5,7 @@
 // D1 stays the source of truth: every vector id is recorded there, so an index can be rebuilt.
 import { CANON } from "./canon.generated.mjs";
 import { canonChunks } from "./canon-chunks.mjs";
-import { embedTexts } from "./embed.mjs";
+import { embedTexts, EMBED_BATCH } from "./embed.mjs";
 import { ensureSchema } from "./store.mjs";
 import { appliedAmendments, effectiveDoctrine, effectiveSha } from "./doctrine.mjs";
 
@@ -39,7 +39,7 @@ export async function syncCanon(env, { now = Date.now() } = {}) {
   const doctrine = sha === CANON.content_sha256 ? null : effectiveDoctrine(await appliedAmendments(db));
   const chunks = canonChunks(CANON, { doctrine, sha });
   const vectors = await embedTexts(env, chunks.map((c) => c.text), { now });
-  if (!vectors) return { status: "budget_or_model_refused", chunks: chunks.length };
+  if (!vectors) return { status: "model_refused", chunks: chunks.length };
   for (let i = 0; i < chunks.length; i += 100) {
     await env.CANON_INDEX.upsert(chunks.slice(i, i + 100).map((c, j) => ({ id: c.id, values: vectors[i + j], metadata: c.metadata })));
   }
@@ -68,23 +68,53 @@ export function cardText(card) {
 }
 const dayOf = (iso) => Number(String(iso).slice(0, 10).replaceAll("-", ""));
 
-/** Embeds up to `limit` cards not embedded yet (or updated since) into aether-market, namespace "decision". */
-export async function embedPendingCards(env, { now = Date.now(), limit = 50 } = {}) {
+/**
+ * How long one run may keep embedding (wall time). A Cron Trigger has 15 minutes and the steps after this
+ * one (reviews, amendments, digest, curation, council) need time too. This is not a cap on learning: cards
+ * not reached stay pending (embedded_at unset) and the next hourly run carries them; nothing is dropped.
+ */
+export const EMBED_RUN_WALL_MS = 8 * 60_000;
+const PENDING = "(embedded_at IS NULL OR embedded_at < updated_at)";
+
+/**
+ * Embeds every card not embedded yet (or updated since) into aether-market, namespace "decision", one
+ * Workers AI request per page of EMBED_BATCH cards (owner 2026-11-14: learning is never limited). Pages are
+ * read in (bar_open, card_id) order with a cursor, so each card is embedded at most once per run. When the
+ * run's wall time is spent, the rest is carried to the next run and reported as `carried`.
+ */
+export async function embedPendingCards(env, { now = Date.now(), clock = Date.now, wallMs = EMBED_RUN_WALL_MS } = {}) {
   const db = env.AETHER_DB;
   if (!db || !env.AI || !env.MARKET_INDEX) return { status: "unavailable" };
   await ensureIndexSchema(db);
-  const rows = (await db.prepare("SELECT card_id, card_json FROM decision_cards WHERE embedded_at IS NULL OR embedded_at < updated_at ORDER BY bar_open LIMIT ?").bind(limit).all()).results || [];
-  if (!rows.length) return { status: "nothing_pending" };
-  const cards = rows.map((r) => JSON.parse(r.card_json));
-  const vectors = await embedTexts(env, cards.map(cardText), { now });
-  if (!vectors) return { status: "budget_or_model_refused", pending: rows.length };
-  await env.MARKET_INDEX.upsert(cards.map((card, i) => ({
-    id: card.card_id, namespace: "decision", values: vectors[i],
-    metadata: { kind: "decision", chart: card.chart, session: card.session ?? "unknown", stance: card.conclusion?.stance ?? "?", day: dayOf(card.bar_open) }
-  })));
+  const started = clock();
   const at = new Date(now).toISOString();
-  for (const r of rows) await db.prepare("UPDATE decision_cards SET embedded_at = ? WHERE card_id = ?").bind(at, r.card_id).run();
-  return { status: "embedded", cards: rows.length };
+  let cards = 0, batches = 0, cursor = null, refused = false;
+  for (;;) {
+    if (batches > 0 && clock() - started >= wallMs) break;
+    const page = cursor
+      ? await db.prepare(`SELECT card_id, bar_open, card_json FROM decision_cards WHERE ${PENDING} AND (bar_open > ? OR (bar_open = ? AND card_id > ?)) ORDER BY bar_open, card_id LIMIT ?`).bind(cursor.bar_open, cursor.bar_open, cursor.card_id, EMBED_BATCH).all()
+      : await db.prepare(`SELECT card_id, bar_open, card_json FROM decision_cards WHERE ${PENDING} ORDER BY bar_open, card_id LIMIT ?`).bind(EMBED_BATCH).all();
+    const rows = page.results || [];
+    if (!rows.length) break;
+    cursor = rows.at(-1);
+    const list = rows.map((r) => JSON.parse(r.card_json));
+    const vectors = await embedTexts(env, list.map(cardText), { now });
+    batches += 1;
+    if (!vectors) { refused = true; break; }
+    await env.MARKET_INDEX.upsert(list.map((card, i) => ({
+      id: card.card_id, namespace: "decision", values: vectors[i],
+      metadata: { kind: "decision", chart: card.chart, session: card.session ?? "unknown", stance: card.conclusion?.stance ?? "?", day: dayOf(card.bar_open) }
+    })));
+    // One statement per page (at most EMBED_BATCH bound ids, within D1's 100 parameters).
+    await db.prepare(`UPDATE decision_cards SET embedded_at = ? WHERE card_id IN (${rows.map(() => "?").join(", ")})`).bind(at, ...rows.map((r) => r.card_id)).run();
+    cards += rows.length;
+    if (rows.length < EMBED_BATCH) break;
+  }
+  const pending = Number((await db.prepare(`SELECT COUNT(*) AS n FROM decision_cards WHERE ${PENDING}`).first())?.n) || 0;
+  if (refused) return { status: "model_refused", cards, batches, pending };
+  if (!cards) return { status: "nothing_pending" };
+  // `carried`: still pending after this run (the wall time was spent, or a card was updated during it).
+  return { status: "embedded", cards, batches, carried: pending };
 }
 
 export async function indexStatus(env) {

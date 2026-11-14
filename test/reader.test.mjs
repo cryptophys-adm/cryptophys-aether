@@ -95,10 +95,10 @@ test("the sync checks: fresh feeds are ok; a stale feed warns while the market w
   const { syncChecks, marketOpen } = await import("../src/reader.mjs");
   const MON = Date.parse("2026-11-09T12:00:00Z");
   const iso = (ms) => new Date(ms).toISOString();
-  const base = { now: MON, lastIngestAt: iso(MON - 30 * 60_000), canonIndexedSha: "a".repeat(64), canonSha: "a".repeat(64), canonIndexedAt: iso(MON - 5 * 3_600_000), oldestPendingAt: iso(MON - 20 * 60_000), pending: 3, weighting: [{ timeframe: "15", received_at: iso(MON - 3_600_000) }, { timeframe: "1D", received_at: iso(MON - 20 * 3_600_000) }], aiUsed: 13, aiLimit: 60, kbSha: "k" };
+  const base = { now: MON, lastIngestAt: iso(MON - 30 * 60_000), canonIndexedSha: "a".repeat(64), canonSha: "a".repeat(64), canonIndexedAt: iso(MON - 5 * 3_600_000), oldestPendingAt: iso(MON - 20 * 60_000), pending: 3, weighting: [{ timeframe: "15", received_at: iso(MON - 3_600_000) }, { timeframe: "1D", received_at: iso(MON - 20 * 3_600_000) }], aiUsed: 13, kbSha: "k" };
   const ok = syncChecks(base);
   assert.equal(ok.overall, "ok");
-  assert.deepEqual(Object.keys(ok.checks), ["ingest", "canon_index", "embed_backlog", "weighting_15", "weighting_1D", "ai_budget"]);
+  assert.deepEqual(Object.keys(ok.checks), ["ingest", "canon_index", "embed_backlog", "weighting_15", "weighting_1D", "ai_usage"]);
   assert.equal(ok.kb_content_sha256, "k");
   const stale = syncChecks({ ...base, lastIngestAt: iso(MON - 3 * 3_600_000) });
   assert.equal(stale.overall, "warn");
@@ -114,7 +114,9 @@ test("the sync checks: fresh feeds are ok; a stale feed warns while the market w
   assert.equal(syncChecks({ ...base, oldestPendingAt: iso(MON - 3 * 3_600_000) }).checks.embed_backlog.status, "warn");
   assert.equal(syncChecks({ ...base, pending: 0, oldestPendingAt: null }).checks.embed_backlog.status, "ok");
   assert.equal(syncChecks({ ...base, weighting: [{ timeframe: "60", received_at: iso(MON - 4 * 3_600_000) }] }).checks.weighting_60.status, "warn");
-  assert.equal(syncChecks({ ...base, aiUsed: 60 }).checks.ai_budget.status, "warn");
+  // Metered, never limited (owner 2026-11-14): any usage is ok, there is no limit to warn about.
+  assert.deepEqual(syncChecks({ ...base, aiUsed: 6000 }).checks.ai_usage, { status: "ok", used_today: 6000, limit: null });
+  assert.equal(syncChecks({ ...base, aiUsed: 6000 }).overall, "ok");
 });
 
 test("aetherSync reads D1 and never throws; the overview carries it", async () => {

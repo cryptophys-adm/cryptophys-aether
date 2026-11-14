@@ -6,7 +6,7 @@
 import { CANON } from "./canon.generated.mjs";
 import { cardCounts } from "./store.mjs";
 import { indexStatus } from "./indexes.mjs";
-import { budgetUsed } from "./budget.mjs";
+import { usageToday } from "./usage.mjs";
 import { knowledgeCounts, curationProgressOf } from "./knowledge.mjs";
 import { weightingReports } from "./weighting.mjs";
 import { latestExecutionReport, executionSummary } from "./execution.mjs";
@@ -77,7 +77,7 @@ const HOUR = 3_600_000;
 /** How old each feed may be while the market is open before the sync check warns. */
 export const SYNC_LIMITS = Object.freeze({
   ingest_ms: 2 * HOUR,          // xauusd pushes cards every hour (the first sweep after the H1 close)
-  embed_backlog_ms: 2 * HOUR,   // the cron at :52 embeds up to 50 cards an hour
+  embed_backlog_ms: 2 * HOUR,   // the cron at :52 embeds every pending card (past its wall time, the next hour carries the rest)
   canon_index_ms: 2 * HOUR,     // the cron re-indexes a new canon within the hour
   weighting_ms: Object.freeze({ "15": 3 * HOUR, "60": 3 * HOUR, "240": 9 * HOUR, "1D": 50 * HOUR, engine: 3 * HOUR })
 });
@@ -100,7 +100,7 @@ function openThroughout(now, span) {
  * Pure: the end-to-end sync checks from the raw facts. Each check is ok, warn or idle (the market was
  * closed during its window, so silence is expected). `overall` is warn when any check warns.
  */
-export function syncChecks({ now, lastIngestAt, canonIndexedSha, canonSha, canonIndexedAt, oldestPendingAt, pending, weighting, aiUsed, aiLimit, kbSha }) {
+export function syncChecks({ now, lastIngestAt, canonIndexedSha, canonSha, canonIndexedAt, oldestPendingAt, pending, weighting, aiUsed, kbSha }) {
   const age = (iso) => { const t = Date.parse(iso ?? ""); return Number.isFinite(t) ? now - t : null; };
   const checks = {};
   const fresh = (key, ageMs, limit, detail) => {
@@ -119,7 +119,8 @@ export function syncChecks({ now, lastIngestAt, canonIndexedSha, canonSha, canon
     if (!limit) continue;
     fresh(`weighting_${w.timeframe}`, age(w.received_at), limit, { last_at: w.received_at ?? null });
   }
-  checks.ai_budget = { status: Number(aiUsed) < Number(aiLimit) ? "ok" : "warn", used: Number(aiUsed) || 0, limit: Number(aiLimit) || 0 };
+  // Metered, never limited (owner 2026-11-14): usage is shown, it never warns and never stops learning.
+  checks.ai_usage = { status: "ok", used_today: Number(aiUsed) || 0, limit: null };
   const overall = Object.values(checks).some((c) => c.status === "warn") ? "warn" : "ok";
   return { version: "cryptophys.aether-sync.v1", overall, market_open: marketOpen(now), kb_content_sha256: kbSha ?? null, canon_sha256: canonSha, checks };
 }
@@ -134,10 +135,10 @@ export async function aetherSync(env, { now = Date.now() } = {}) {
   const canonSha = db ? await safe(() => effectiveSha(db), CANON.content_sha256) : CANON.content_sha256;
   const backlog = await one("SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM decision_cards WHERE embedded_at IS NULL OR embedded_at < updated_at");
   const weighting = db ? await safe(async () => (await weightingReports(db)).map((w) => ({ timeframe: w.timeframe, received_at: w.received_at })), []) : [];
-  const aiUsed = db ? await safe(() => budgetUsed(env, { now }), 0) : 0;
+  const aiUsed = db ? await safe(() => usageToday(env, { now }), 0) : 0;
   return syncChecks({
     now, lastIngestAt: lastIngest?.at ?? null, canonIndexedSha: canonMeta?.value ?? null, canonSha, canonIndexedAt: canonMeta?.updated_at ?? null,
-    oldestPendingAt: backlog?.oldest ?? null, pending: Number(backlog?.n) || 0, weighting, aiUsed, aiLimit: Number(env.AI_DAILY_LIMIT) || 60,
+    oldestPendingAt: backlog?.oldest ?? null, pending: Number(backlog?.n) || 0, weighting, aiUsed,
     kbSha: CANON.indicator?.kb_content_sha256 ?? null
   });
 }
@@ -172,7 +173,7 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
     },
     cards, ingest: { last_24h: ingest24, recent: ingest },
     indexes: db ? await safe(() => indexStatus(env), null) : null,
-    ai: db ? await safe(async () => ({ used_today: await budgetUsed(env, { now }), daily_limit: Number(env.AI_DAILY_LIMIT) || 60 }), null) : null,
+    ai: db ? await safe(async () => ({ used_today: await usageToday(env, { now }), daily_limit: null }), null) : null,
     knowledge: { counts: db ? await safe(() => knowledgeCounts(db), {}) : {}, items: knowledgeItems },
     guardian: { window_hours: 24, cards: lastDay.length, threshold_per_100: COMPLIANCE_WARN_PER_100, findings: complianceFindings(lastDay).slice(0, 30) },
     weighting,

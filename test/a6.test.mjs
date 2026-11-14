@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { ingestCards, resetSchemaCacheForTests } from "../src/store.mjs";
+import { ingestCards, ensureSchema, resetSchemaCacheForTests } from "../src/store.mjs";
 import {
   binomialTail, roleDriftCandidates, cautionCandidates, stuckEpisodes, paramCandidates, runCuration, syncReviews, learnedPack, knowledgeCounts,
-  resetKnowledgeSchemaCacheForTests, TUNING_GRID, ITEM_SCHEMA, MAX_PROPOSALS_PER_RUN
+  resetKnowledgeSchemaCacheForTests, TUNING_GRID, ITEM_SCHEMA, KERNEL_PROPOSE_QUOTA, curationCarried
 } from "../src/knowledge.mjs";
 import { CANON } from "../src/canon.generated.mjs";
 
@@ -37,11 +37,16 @@ const card = (chart, ms, extra = {}) => ({
 const hourly = (days, fn = () => ({})) => Array.from({ length: days * 24 }, (_, i) => { const ms = NOW - (days * 24 - i) * H; return card("60", ms, fn(i, ms)); });
 
 // The platform kernel's knowledge.propose / knowledge.status, as far as Aether sees them.
-function kernel({ deny = false, refuse = [] } = {}) {
-  const proposals = [];
+function kernel({ deny = false, refuse = [], denyReports = false } = {}) {
+  const proposals = [], reports = [];
   return {
-    proposals,
+    proposals, reports,
     async syscall(agentId, capability, input) {
+      if (capability === "reports.publish") {
+        reports.push({ agent: agentId, ...input });
+        if (denyReports) return { outcome: "denied", capability, reason: "failed: kill_switch" };
+        return { outcome: "succeeded", capability, result: { report_id: `rpt_${reports.length}`, agent_id: agentId } };
+      }
       if (capability === "knowledge.propose") {
         if (deny) return { outcome: "denied", capability, reason: "failed: rate_limit" };
         if (refuse.includes(input.item.item_id)) return { outcome: "failed", capability, reason: "invalid_knowledge_item: text_price_like_number" };
@@ -142,7 +147,94 @@ test("runCuration proposes through the kernel, never twice, records refusals, an
   for (let i = 0; i < cards.length; i += 50) await ingestCards(fresh, cards.slice(i, i + 50), { now: NOW });
   const denied = await runCuration({ AETHER_DB: fresh, AGENTS: kernel({ deny: true }) }, { now: NOW });
   assert.match(String(denied.curator.stopped), /^denied/, "a denial is final for the run");
-  assert.ok(MAX_PROPOSALS_PER_RUN <= 6);
+  assert.ok(denied.curator.carried >= 1, "the denied candidates are not dropped: the next daily run draws them again");
+  assert.equal(await curationCarried({ AETHER_DB: fresh }), false, "after a denial nothing is retried in the next hour (rule 6)");
+  assert.deepEqual({ ...KERNEL_PROPOSE_QUOTA }, { per_hour: 6, per_day: 20 }, "the kernel's quota, mirrored");
+});
+
+test("owner 2026-11-14: every candidate is proposed (beyond the old 3 a run), paced to the kernel's quota, the rest carried to the next hour", async () => {
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const db = d1();
+  const checks = ["calibration_talk", "data_scope", "natural_language"];
+  const cards = hourly(7, (i) => ({ compliance: i % 8 === 0 ? ["r37_funnel", "prophet", "moderator"].flatMap((agent) => checks.map((check) => ({ agent, check }))) : [] }));
+  for (let i = 0; i < cards.length; i += 50) await ingestCards(db, cards.slice(i, i + 50), { now: NOW });
+  const k = kernel();
+  const env = { AETHER_DB: db, AGENTS: k };
+  const first = await runCuration(env, { now: NOW });
+  assert.equal(first.candidates.curator, 9);
+  assert.deepEqual([first.curator.proposed, first.curator.carried, first.curator.stopped], [KERNEL_PROPOSE_QUOTA.per_hour, 3, null], "6 proposed (the kernel's hourly quota, not 3), 3 carried");
+  assert.equal(await curationCarried(env), true, "the next hour runs again");
+  const sameHour = await runCuration(env, { now: NOW + 10 * 60_000 });
+  assert.deepEqual([sameHour.curator.proposed, sameHour.curator.carried], [0, 3], "within the hour the quota is spent: carried, no denial asked for");
+  assert.equal(k.proposals.length, 6);
+  // At the next :52 the kernel's one-hour window (real time) can still hold the first six: no call is risked.
+  assert.equal((await runCuration(env, { now: NOW + 3_600_000 })).curator.carried, 3);
+  const next = await runCuration(env, { now: NOW + 2 * 3_600_000 });
+  assert.deepEqual([next.curator.proposed, next.curator.carried, next.curator.skipped], [3, 0, 6], "once the window has passed, the rest is proposed");
+  assert.equal(await curationCarried(env), false);
+  assert.equal(new Set(k.proposals.map((p) => p.item_id)).size, 9, "all nine proposed, none twice, none dropped");
+});
+
+test("owner 2026-11-14: the curator and the calibrator each leave one recorded report per daily run, with or without a candidate; none on the carry runs", async () => {
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const db = d1();
+  // Curator candidates only (role drift): the calibrator has nothing to propose.
+  const cards = hourly(7, (i) => ({ compliance: i % 8 === 0 ? [{ agent: "r37_funnel", check: "calibration_talk" }] : [] }));
+  for (let i = 0; i < cards.length; i += 50) await ingestCards(db, cards.slice(i, i + 50), { now: NOW });
+  const k = kernel();
+  const env = { AETHER_DB: db, AGENTS: k };
+  const run = await runCuration(env, { now: NOW, daily: true });
+  assert.equal(run.candidates.calibrator, 0);
+  assert.equal(run.curator.proposed, 1);
+  assert.deepEqual([run.curator_report, run.calibrator_report], ["succeeded", "succeeded"]);
+  assert.equal(k.reports.length, 2, "exactly one report per agent");
+  assert.deepEqual(k.reports, [{
+    agent: "aether-curator", kind: "knowledge_audit", severity: "info", subject: "Curator run: 1 candidate, 1 proposed, 0 carried", ai_status: "deterministic",
+    body: { advisory: "advisory only; not an order", run_at: new Date(NOW).toISOString(), cards: cards.length, candidates: 1, proposed: 1, carried: 0, skipped: 0, refused: 0, stopped: null }
+  }, {
+    agent: "aether-calibrator", kind: "knowledge_audit", severity: "info", subject: `Calibrator run: no candidate in ${cards.length} cards`, ai_status: "deterministic",
+    body: { advisory: "advisory only; not an order", run_at: new Date(NOW).toISOString(), cards: cards.length, candidates: 0, proposed: 0, carried: 0, skipped: 0, refused: 0, stopped: null }
+  }]);
+  // A carry run (not daily) reports nothing; the next daily run reports once again.
+  const carry = await runCuration(env, { now: NOW + H });
+  assert.equal(carry.curator_report, undefined);
+  assert.equal(carry.calibrator_report, undefined);
+  assert.equal(k.reports.length, 2);
+  await runCuration(env, { now: NOW + 24 * H, daily: true });
+  assert.equal(k.reports.length, 4, "one report per agent per daily run");
+  assert.deepEqual(k.reports.map((r) => r.agent), ["aether-curator", "aether-calibrator", "aether-curator", "aether-calibrator"]);
+  assert.deepEqual(k.reports.slice(2).map((r) => [r.severity, r.body.run_at, r.body.proposed]), [["info", new Date(NOW + 24 * H).toISOString(), 0], ["info", new Date(NOW + 24 * H).toISOString(), 0]]);
+
+  // With no card at all, and with a candidate: still exactly one report, counts only.
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const empty = kernel(), emptyDb = d1();
+  await ensureSchema(emptyDb);
+  const none = await runCuration({ AETHER_DB: emptyDb, AGENTS: empty }, { now: NOW, daily: true });
+  assert.equal(none.cards, 0);
+  assert.deepEqual(empty.reports.map((r) => [r.agent, r.severity, r.subject, r.body.cards, r.body.candidates]), [["aether-curator", "info", "Curator run: no candidate in 0 cards", 0, 0], ["aether-calibrator", "info", "Calibrator run: no candidate in 0 cards", 0, 0]], "the curator reports a run with no candidate too");
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const withCandidate = d1();
+  const stuck = hourly(7, (i) => ({ stuck_open: (i % 40) < 6 ? [{ field: "prophet_r37.structure_subtype", candles: 9 }] : [] }));
+  for (let i = 0; i < stuck.length; i += 50) await ingestCards(withCandidate, stuck.slice(i, i + 50), { now: NOW });
+  const k2 = kernel();
+  await runCuration({ AETHER_DB: withCandidate, AGENTS: k2 }, { now: NOW, daily: true });
+  assert.deepEqual(k2.reports.map((r) => r.subject), ["Curator run: no candidate in " + stuck.length + " cards", "Calibrator run: 1 candidate, 1 proposed, 0 carried"]);
+  assert.deepEqual([k2.reports[1].body.candidates, k2.reports[1].body.proposed, k2.reports[1].body.carried], [1, 1, 0]);
+  assert.doesNotMatch(JSON.stringify(k2.reports), /[0-9]{4}\.[0-9]|price|level|lot/i, "counts only, never a price");
+
+  // A denial is final (AGENTS.md rule 6): sent once, never retried.
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const denied = kernel({ denyReports: true }), deniedDb = d1();
+  await ensureSchema(deniedDb);
+  const r = await runCuration({ AETHER_DB: deniedDb, AGENTS: denied }, { now: NOW, daily: true });
+  assert.deepEqual([r.curator_report, r.calibrator_report], ["denied", "denied"]);
+  assert.deepEqual(denied.reports.map((x) => x.agent), ["aether-curator", "aether-calibrator"], "each sent once, no retry");
+  // Without the kernel binding nothing throws.
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const unbound = d1();
+  await ensureSchema(unbound);
+  const u = await runCuration({ AETHER_DB: unbound }, { now: NOW, daily: true });
+  assert.deepEqual([u.curator_report, u.calibrator_report], ["unavailable", "unavailable"]);
 });
 
 test("reviews come back through knowledge.status; approved items form the learned pack, labelled and shadow-only", async () => {

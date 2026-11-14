@@ -2,9 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { canonChunks } from "../src/canon-chunks.mjs";
-import { takeBudget, budgetUsed } from "../src/budget.mjs";
+import { recordUsage, usageToday } from "../src/usage.mjs";
+import { readFileSync, readdirSync } from "node:fs";
 import { embedTexts, EMBED_DIMENSIONS, EMBED_BATCH } from "../src/embed.mjs";
-import { syncCanon, embedPendingCards, indexStatus, cardText, resetIndexSchemaCacheForTests } from "../src/indexes.mjs";
+import { syncCanon, embedPendingCards, indexStatus, cardText, resetIndexSchemaCacheForTests, EMBED_RUN_WALL_MS } from "../src/indexes.mjs";
 import { complianceFindings, missesOf, runDigest, COMPLIANCE_WARN_PER_100 } from "../src/guardian.mjs";
 import { ingestCards, resetSchemaCacheForTests } from "../src/store.mjs";
 import { INDEXES, parseWranglerJson } from "../scripts/ensure-vectorize.mjs";
@@ -41,7 +42,7 @@ function fakeIndex() {
 }
 function env(over = {}) {
   resetSchemaCacheForTests(); resetIndexSchemaCacheForTests();
-  return { AETHER_DB: d1(), AI: fakeAi(), CANON_INDEX: fakeIndex(), MARKET_INDEX: fakeIndex(), AI_DAILY_LIMIT: "60", ...over };
+  return { AETHER_DB: d1(), AI: fakeAi(), CANON_INDEX: fakeIndex(), MARKET_INDEX: fakeIndex(), ...over };
 }
 const NOW = Date.parse("2026-11-08T01:52:00Z");
 const card = (i, over = {}) => ({
@@ -61,18 +62,75 @@ test("canon chunks: every part is covered, ids are stable and at most 64 bytes, 
   assert.ok(a.every((c) => Buffer.byteLength(c.id) <= 64 && c.text.length > 10 && c.text.length <= 1500 && c.metadata.canon === CANON.content_sha256.slice(0, 8)));
 });
 
-test("the AI budget is shared in D1 and refuses past the daily limit; embeddings are batched", async () => {
-  const e = env({ AI_DAILY_LIMIT: "2" });
-  assert.equal(await takeBudget(e, 1, { now: NOW }), true);
-  assert.equal(await takeBudget(e, 1, { now: NOW }), true);
-  assert.equal(await takeBudget(e, 1, { now: NOW }), false);
-  assert.equal(await budgetUsed(e, { now: NOW }), 2);
-  assert.equal(await takeBudget(e, 1, { now: NOW + 86_400_000 }), true, "a new day starts a new budget");
+test("AI usage is metered in D1 per day and never refuses; embeddings are batched", async () => {
+  const e = env();
+  assert.equal(await recordUsage(e, 1, { now: NOW }), 1);
+  assert.equal(await recordUsage(e, 2, { now: NOW }), 3);
+  assert.equal(await usageToday(e, { now: NOW }), 3);
+  assert.equal(await usageToday(e, { now: NOW + 86_400_000 }), 0, "a new day starts a new count");
   const e2 = env();
   const v = await embedTexts(e2, Array.from({ length: EMBED_BATCH + 1 }, (_, i) => "t" + i), { now: NOW });
   assert.equal(v.length, EMBED_BATCH + 1);
   assert.deepEqual(e2.AI.calls.map((c) => c.n), [EMBED_BATCH, 1], "one request per batch");
+  assert.equal(await usageToday(e2, { now: NOW }), 2, "each request is recorded");
   assert.equal(await embedTexts({ ...e2, AI: { run: async () => ({ data: [[1, 2]] }) } }, ["x"], { now: NOW }), null, "a wrong shape is refused");
+  assert.equal(await usageToday(e2, { now: NOW }), 3, "a refused answer is still metered");
+});
+
+test("owner 2026-11-14: learning past the old 60 requests a day is processed, and still metered", async () => {
+  const e = env();
+  const texts = Array.from({ length: 70 * EMBED_BATCH }, (_, i) => "text " + i);
+  const v = await embedTexts(e, texts, { now: NOW });
+  assert.equal(v.length, texts.length, "70 requests in one day: every text embedded");
+  assert.equal(e.AI.calls.length, 70);
+  assert.equal(await usageToday(e, { now: NOW }), 70, "ai_usage holds every request");
+  // A canon re-index on top of that day: indexed, not deferred to the next day.
+  const r = await syncCanon(e, { now: NOW });
+  assert.equal(r.status, "indexed");
+  assert.equal(await usageToday(e, { now: NOW }), 70 + Math.ceil(canonChunks().length / EMBED_BATCH));
+  // Old limit variable set by mistake: ignored.
+  const legacy = env({ AI_DAILY_LIMIT: "1" });
+  assert.equal((await syncCanon(legacy, { now: NOW })).status, "indexed", "no budget variable can stop the canon index");
+});
+
+test("embedPendingCards embeds every pending card (well beyond 60 requests and 50 cards a run), one request per 50", async () => {
+  const e = env();
+  const N = 61 * EMBED_BATCH + 7; // 3057 cards: 62 requests, more than the old 60 a day and the old 50 cards a run
+  for (let i = 0; i < N; i += 500) {
+    await ingestCards(e.AETHER_DB, Array.from({ length: Math.min(500, N - i) }, (_, j) => card(0, { card_id: `d:15:${1794000000000 + (i + j) * 900000}:0`, chart: "15", bar_open: new Date(NOW - (N - i - j) * 900000).toISOString() })), { now: NOW - 60_000 });
+  }
+  const r = await embedPendingCards(e, { now: NOW });
+  assert.deepEqual([r.status, r.cards, r.batches, r.carried], ["embedded", N, 62, 0]);
+  assert.equal(e.MARKET_INDEX.store.size, N);
+  assert.equal(e.AI.calls.length, 62);
+  assert.ok(e.AI.calls.every((c) => c.n <= EMBED_BATCH));
+  assert.equal(await usageToday(e, { now: NOW }), 62, "every request is recorded in ai_usage");
+  assert.equal((await indexStatus(e)).market.pending_cards, 0);
+  assert.equal((await embedPendingCards(e, { now: NOW })).status, "nothing_pending");
+});
+
+test("embedPendingCards carries what a run's wall time does not reach to the next run, never drops it", async () => {
+  const e = env();
+  await ingestCards(e.AETHER_DB, Array.from({ length: 120 }, (_, i) => card(0, { card_id: `d:15:${1794000000000 + i * 900000}:0`, chart: "15", bar_open: new Date(NOW - (120 - i) * 900000).toISOString() })), { now: NOW - 60_000 });
+  let t = 0;
+  const clock = () => (t += EMBED_RUN_WALL_MS); // the run's wall time is spent after the first page
+  const first = await embedPendingCards(e, { now: NOW, clock });
+  assert.deepEqual([first.status, first.cards, first.carried], ["embedded", 50, 70], "the rest is reported as carried");
+  const second = await embedPendingCards(e, { now: NOW + 3_600_000 });
+  assert.deepEqual([second.cards, second.carried], [70, 0], "the next run embeds the rest");
+  assert.equal(e.MARKET_INDEX.store.size, 120);
+});
+
+test("no learning path refuses or skips for a budget or rate reason of Aether's own", () => {
+  const files = readdirSync(new URL("../src/", import.meta.url)).filter((f) => f.endsWith(".mjs") && f !== "canon.generated.mjs");
+  for (const f of files) {
+    const text = readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8").replace(/^\s*(\/\/|\*).*$/gm, "");
+    for (const banned of [/AI_DAILY_LIMIT/, /takeBudget/, /budget_or_model_refused/, /DEFAULT_DAILY_LIMIT/, /MAX_PROPOSALS_PER_RUN/, /MAX_CARDS_PER_CALL/, /LIMIT \?"\)\.bind\(limit\)/]) {
+      assert.doesNotMatch(text, banned, `src/${f}: ${banned}`);
+    }
+  }
+  const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
+  assert.doesNotMatch(wrangler, /"AI_DAILY_LIMIT"/, "no AI budget variable in wrangler.jsonc");
 });
 
 test("syncCanon embeds the canon once per version and is a no-op after; missing bindings are reported", async () => {
@@ -84,8 +142,8 @@ test("syncCanon embeds the canon once per version and is a no-op after; missing 
   assert.equal(e.AI.calls.length, Math.ceil(canonChunks().length / EMBED_BATCH), "no second embedding");
   assert.equal((await indexStatus(e)).canon.indexed, true);
   assert.equal((await syncCanon({ AETHER_DB: e.AETHER_DB }, { now: NOW })).status, "unavailable");
-  const poor = env({ AI_DAILY_LIMIT: "1" });
-  assert.equal((await syncCanon(poor, { now: NOW })).status, "budget_or_model_refused", "a canon larger than the budget waits for the next day");
+  const bad = env({ AI: { run: async () => ({ data: [] }) } });
+  assert.equal((await syncCanon(bad, { now: NOW })).status, "model_refused", "a wrong model answer indexes nothing");
 });
 
 test("cards are embedded into aether-market once, and again after an update; the text has no levels", async () => {

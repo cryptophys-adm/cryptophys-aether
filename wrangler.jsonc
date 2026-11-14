@@ -23,7 +23,8 @@
     { "binding": "CANON_INDEX", "index_name": "aether-canon" },
     { "binding": "MARKET_INDEX", "index_name": "aether-market" }
   ],
-  // Workers AI for embeddings only (bge-small-en-v1.5), within AI_DAILY_LIMIT requests a day.
+  // Workers AI for embeddings only (bge-small-en-v1.5). Metered per day in D1 (ai_usage), never limited
+  // (owner 2026-11-14: "learning tidak boleh dibatasi siapa pun, itu adalah mandat tertinggi").
   "ai": { "binding": "AI" },
   // Phase A3 (platform TP-027, deployed 2026-11-07): the kernel's AgentRpc, as host cryptophys-aether.
   // No secret: the caller identity is the pinned host_worker. Reports only (knowledge_audit).
@@ -33,7 +34,6 @@
   "triggers": { "crons": ["52 * * * *"] },
   "vars": {
     "AETHER_PHASE": "A6",
-    "AI_DAILY_LIMIT": "60",
     // Owner 2026-11-11: the Knowledge Council's daily session ("propose" sends amendments to Cerebrum;
     // "observe" records the review only; "off" skips it).
     "KNOWLEDGE_COUNCIL": "propose"

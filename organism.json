@@ -1,5 +1,5 @@
 {
-  "$comment": "Aether's DNA (owner 2026-11-14: \"ya, Aether perlu DNA, tes CI, dan file yang dilindungi sendiri lebih dulu sebelum boleh diubah oleh agen\"). `organs` follows the platform's DNA schema (cryptophys-cloud-platform ADR-0013, control-plane-shared/src/organism.ts parseDna, the external-organ shape of xauusd-organism.v1). `anatomy` adds what the census does not read yet: entrypoints, bindings, storage, crons, models and callers. test/organism-dna.test.mjs keeps every entry equal to wrangler.jsonc and src/. This file is a guard path (guard-paths.json): a change needs the owner's merge.",
+  "$comment": "Aether's DNA (owner 2026-11-14: \"ya, Aether perlu DNA, tes CI, dan file yang dilindungi sendiri lebih dulu sebelum boleh diubah oleh agen\"). `organs` follows the platform's DNA schema (cryptophys-cloud-platform ADR-0013, control-plane-shared/src/organism.ts parseDna, the external-organ shape of xauusd-organism.v1). `anatomy` adds what the census does not read yet: entrypoints, bindings, storage, crons, models and callers. Each agent's `schedule` is the daily run of the scheduled handler that acts as it (owner 2026-11-14: \"jangan pensiun aether calibrator karena cara kerjanya memang idle sampai jadwalnya kerja\"). The platform Forge reads this file through the RPC entrypoint OrganismDna (dna(), owner 2026-11-14: \"naikan batas kapabilitas aether\"). test/organism-dna.test.mjs keeps every entry equal to wrangler.jsonc and src/. This file is a guard path (guard-paths.json): a change needs the owner's merge.",
   "schema": "aether-organism.v1",
   "organs": [
     {
@@ -23,7 +23,10 @@
             "reports.publish"
           ],
           "tier_max": 1,
-          "voter": false
+          "voter": false,
+          "schedule": {
+            "cron": "52 1 * * *"
+          }
         },
         {
           "id": "aether-auditor",
@@ -33,7 +36,10 @@
             "reports.publish"
           ],
           "tier_max": 1,
-          "voter": false
+          "voter": false,
+          "schedule": {
+            "cron": "52 1 * * *"
+          }
         },
         {
           "id": "aether-curator",
@@ -44,7 +50,10 @@
             "knowledge.status"
           ],
           "tier_max": 1,
-          "voter": false
+          "voter": false,
+          "schedule": {
+            "cron": "52 2 * * *"
+          }
         },
         {
           "id": "aether-calibrator",
@@ -55,7 +64,10 @@
             "knowledge.status"
           ],
           "tier_max": 1,
-          "voter": false
+          "voter": false,
+          "schedule": {
+            "cron": "52 2 * * *"
+          }
         },
         {
           "id": "knowledge-council",
@@ -66,7 +78,10 @@
             "reports.publish"
           ],
           "tier_max": 1,
-          "voter": false
+          "voter": false,
+          "schedule": {
+            "cron": "52 3 * * *"
+          }
         }
       ],
       "engines": [
@@ -118,6 +133,14 @@
             { "service": "xauusd-nexus-dashboard", "binding": "AETHER" },
             { "service": "xauusd-ai-trading-assistant", "binding": "AETHER_READER" }
           ]
+        },
+        {
+          "name": "OrganismDna",
+          "kind": "rpc",
+          "methods": ["dna"],
+          "callers": [
+            { "service": "cryptophys-forge", "binding": "EXT_ORGANISM_AETHER" }
+          ]
         }
       ],
       "bindings": [
@@ -129,7 +152,6 @@
       ],
       "vars": {
         "AETHER_PHASE": "A6",
-        "AI_DAILY_LIMIT": "60",
         "KNOWLEDGE_COUNCIL": "propose"
       },
       "code_defaults": {
@@ -161,7 +183,8 @@
           "model": "@cf/baai/bge-small-en-v1.5",
           "dimensions": 384,
           "batch": 50,
-          "budget": { "var": "AI_DAILY_LIMIT", "default": 60 },
+          "budget": null,
+          "metering": { "table": "ai_usage", "unit": "requests", "per": "utc_day", "module": "src/usage.mjs" },
           "used_by": ["embedPendingCards", "syncCanon"]
         }
       ],
@@ -176,13 +199,14 @@
         { "step": "doctrine_amendments", "utc_hour": null },
         { "step": "digest", "utc_hour": 1 },
         { "step": "curation", "utc_hour": 2 },
+        { "step": "curation_carry", "utc_hour": null },
         { "step": "knowledge_council", "utc_hour": 3 }
       ],
       "agents": [
         { "id": "aether-guardian", "module": "src/guardian.mjs", "uses": ["reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0027" },
         { "id": "aether-auditor", "module": "src/guardian.mjs", "uses": ["reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0027" },
-        { "id": "aether-curator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
-        { "id": "aether-calibrator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
+        { "id": "aether-curator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
+        { "id": "aether-calibrator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
         { "id": "knowledge-council", "module": "src/doctrine.mjs", "uses": ["consensus.propose", "doctrine.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0045" }
       ]
     }

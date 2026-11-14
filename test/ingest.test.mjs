@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { validateCard, cardLeaks } from "../src/card-guard.mjs";
-import { ingestCards, cardCounts, resetSchemaCacheForTests, MAX_CARDS_PER_CALL } from "../src/store.mjs";
+import { ingestCards, cardCounts, resetSchemaCacheForTests } from "../src/store.mjs";
 import { CANON } from "../src/canon.generated.mjs";
 
 function d1() {
@@ -60,8 +60,10 @@ test("ingestCards stores accepted cards once, updates them in place and reports 
   assert.equal(row.n, 1, "one row per card");
   assert.equal(JSON.parse(row.card_json).outcomes["agent:prophet"].result, "hit", "outcomes arrive later and update the card");
   assert.deepEqual(await cardCounts(db), { "60": { cards: 1, latest_bar: "2026-11-06T21:00:00.000Z" } });
-  const many = await ingestCards(db, Array.from({ length: MAX_CARDS_PER_CALL + 3 }, (_, i) => card({ card_id: `d:15:${1793998800000 + i}:0`, chart: "15" })));
-  assert.equal(many.accepted, MAX_CARDS_PER_CALL);
-  assert.equal(many.truncated, 3);
+  // Owner 2026-11-14 (learning is never limited): every card of a call is stored, none truncated (was: the first 50).
+  const many = await ingestCards(db, Array.from({ length: 53 }, (_, i) => card({ card_id: `d:15:${1793998800000 + i}:0`, chart: "15" })));
+  assert.equal(many.accepted, 53);
+  assert.equal(many.truncated, 0);
+  assert.equal(db.raw.prepare("SELECT COUNT(*) AS n FROM decision_cards WHERE chart = '15'").get().n, 53);
   assert.equal((await ingestCards(db, "nope")).accepted, 0);
 });
