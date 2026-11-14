@@ -5,6 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import { registerHooks } from "node:module";
 import { CURATOR, CALIBRATOR } from "../src/knowledge.mjs";
 import { COUNCIL_AGENT, COUNCIL_HOUR_UTC } from "../src/doctrine.mjs";
 import { EMBED_MODEL, EMBED_DIMENSIONS, EMBED_BATCH } from "../src/embed.mjs";
@@ -32,8 +33,27 @@ function stripJsonc(text) {
 }
 
 /**
+ * The cron subset an agent's schedule may use, mirrored from the platform's organism.ts SCHEDULE_CRON and
+ * schedulePeriodMs (owner 2026-11-14: "jangan pensiun aether calibrator karena cara kerjanya memang idle sampai
+ * jadwalnya kerja"): five fields, UTC, a fixed minute, then "M * * * *" hourly, "M H * * *" daily, "M H * * D"
+ * weekly (D 0-6) or "M H d * *" monthly (d 1-28). No lists, ranges, steps, months or names.
+ */
+const SCHEDULE_CRON = /^([0-5]?[0-9]) (\*|[01]?[0-9]|2[0-3]) (\*|[1-9]|1[0-9]|2[0-8]) \* (\*|[0-6])$/;
+const HOUR_MS = 3_600_000;
+function schedulePeriodMs(cron) {
+  if (typeof cron !== "string") return null;
+  const m = SCHEDULE_CRON.exec(cron);
+  if (!m) return null;
+  const [, , hour, dom, dow] = m;
+  if (hour === "*") return dom === "*" && dow === "*" ? HOUR_MS : null;
+  if (dom !== "*" && dow !== "*") return null;
+  return dow !== "*" ? 7 * 24 * HOUR_MS : dom !== "*" ? 31 * 24 * HOUR_MS : 24 * HOUR_MS;
+}
+
+/**
  * The platform's DNA validator, mirrored from cryptophys-cloud-platform workers/control-plane-shared/src/organism.ts
- * (parseDna, $schema_version 1). A change there is mirrored here by a reviewed PR; this copy never widens it.
+ * (parseDna, $schema_version 1, with the agent schedule of 2026-11-14). A change there is mirrored here by a
+ * reviewed PR; this copy never widens it.
  */
 function parseDna(raw, where = "organ") {
   const ID = /^[a-z0-9][a-z0-9-]{1,62}$/;
@@ -61,6 +81,10 @@ function parseDna(raw, where = "organ") {
     if (!Number.isInteger(a.tier_max) || a.tier_max < 0 || a.tier_max > 2) fail(`agent ${a.id}: tier_max`);
     if (typeof a.voter !== "boolean") fail(`agent ${a.id}: voter`);
     if (a.vote_binding !== undefined && (!a.voter || !BINDING.test(a.vote_binding))) fail(`agent ${a.id}: vote_binding`);
+    if (a.schedule !== undefined) {
+      const sch = a.schedule;
+      if (!sch || typeof sch !== "object" || Array.isArray(sch) || Object.keys(sch).some((k) => k !== "cron") || schedulePeriodMs(sch.cron) === null) fail(`agent ${a.id}: schedule`);
+    }
   }
   if (raw.agents.filter((a) => a.voter && a.vote_binding).length > 1) fail("one vote per Worker");
   const tasks = new Set();
@@ -101,6 +125,12 @@ test("D0. organism.json is schema-valid: aether-organism.v1, one organ per Worke
   bad({ agents: [{ ...organ.agents[0], capabilities: ["Trade.Execute!"] }] }, /capabilities/);
   bad({ agents: [organ.agents[0], organ.agents[0]] }, /agent/);
   bad({ engines: [{ task: "x" }] }, /engine/);
+  // The schedule (the platform's AS1 cases): only the cron subset, only { cron }.
+  for (const cron of ["52 * * * *", "52 2 * * *", "52 2 * * 1", "52 2 1 * *", "0 0 28 * *"]) parseDna({ ...organ, agents: [{ ...organ.agents[0], schedule: { cron } }] });
+  for (const schedule of [{ cron: "*/5 * * * *" }, { cron: "52 2 * * 1-5" }, { cron: "52 2 1 * 1" }, { cron: "52 * 1 * *" }, { cron: "52 2 29 * *" }, { cron: "52 24 * * *" },
+    { cron: "52 2 * 1 *" }, { cron: "52 2 * * *", cadence_hours: 24 }, { cadence_hours: 24 }, "52 2 * * *", [], null]) {
+    bad({ agents: [{ ...organ.agents[0], schedule }] }, /schedule/);
+  }
   for (const a of anatomy.agents) assert.deepEqual(sorted(Object.keys(a)), ["id", "module", "registered_by", "uses"], a.id);
 });
 
@@ -136,6 +166,13 @@ test("D2. the agents are exactly those the code acts as on the kernel, each usin
   const agentArgs = [...k.matchAll(/proposeAll\(env, ([A-Z_]+),/g)].map((m) => m[1]).concat([...k.matchAll(/for \(const agentId of \[([A-Z_, ]+)\]\)/g)].flatMap((m) => m[1].split(/,\s*/)));
   assert.deepEqual(sorted(new Set(agentArgs)), ["CALIBRATOR", "CURATOR"], "knowledge.mjs acts only as the curator and the calibrator");
   for (const id of [CURATOR, CALIBRATOR]) add(id, caps(k, /syscall\(env, agentId, "([a-z]+\.[a-z_]+)"/g));
+  // syscall(env, CURATOR | CALIBRATOR, "<capability>"): as that agent only. Owner 2026-11-14 ("jangan pensiun aether
+  // calibrator karena cara kerjanya memang idle sampai jadwalnya kerja"): the calibrator's daily run report is the one.
+  const named = [...k.matchAll(/syscall\(env, (CURATOR|CALIBRATOR), "([a-z]+\.[a-z_]+)"/g)].map((m) => ({ site: `${enclosingFunction(k, m.index)}:${m[1]}:${m[2]}`, id: m[1] === "CURATOR" ? CURATOR : CALIBRATOR, capability: m[2] }));
+  assert.deepEqual(named.map((x) => x.site), ["publishCalibratorRun:CALIBRATOR:reports.publish"], "the syscalls knowledge.mjs makes as a named agent");
+  for (const x of named) add(x.id, [x.capability]);
+  const calls = [...k.matchAll(/(?<!function )\bsyscall\(env, /g)].length;
+  assert.equal([...k.matchAll(/(?<!function )\bsyscall\(env, (?:agentId|CURATOR|CALIBRATOR), "[a-z]+\.[a-z_]+"/g)].length, calls, "every syscall in knowledge.mjs names its capability and acts as agentId, CURATOR or CALIBRATOR");
   // doctrine.mjs: syscall(env, "<capability>") always as COUNCIL_AGENT.
   assert.match(src["src/doctrine.mjs"], /env\.AGENTS\.syscall\(COUNCIL_AGENT, capability, input\)/);
   add(COUNCIL_AGENT, caps(src["src/doctrine.mjs"], /syscall\(env, "([a-z]+\.[a-z_]+)"/g));
@@ -238,6 +275,41 @@ test("D6. the crons are exactly wrangler.jsonc's, and the schedule is every step
   assert.deepEqual(anatomy.schedule, steps, "organism.json anatomy.schedule = the scheduled handler's steps, in order");
   // Every daily hour runs at the cron's minute (52), and the cron fires every hour.
   assert.match(anatomy.crons[0], /^52 \* \* \* \*$/);
+
+  // Owner 2026-11-14 ("jangan pensiun aether calibrator karena cara kerjanya memang idle sampai jadwalnya kerja"):
+  // each agent's schedule is the daily step of the scheduled handler that acts as it, at the cron's minute.
+  const calls = [...body.matchAll(/(?:if \(new Date\(now\)\.getUTCHours\(\) === ([0-9]+|COUNCIL_HOUR_UTC)\) )?(?:else if \([^)]*\)\) )?await step\("([a-z_]+)", \(\) => (\w+)\(/g)].map((m) => ({ step: m[2], utc_hour: m[1] === undefined ? null : hour(m[1]), fn: m[3] }));
+  assert.deepEqual(calls.map((c) => c.step), steps.map((s) => s.step), "every step's function is read");
+  const minute = anatomy.crons[0].split(" ")[0];
+  const src = Object.fromEntries(SRC.map(({ f, text }) => [f, text]));
+  /** The run function of each agent, and how its module acts as that agent inside it. */
+  const RUNS = {
+    "aether-guardian": ["runDigest", /publish\(env, "aether-guardian"/],
+    "aether-auditor": ["runDigest", /publish\(env, "aether-auditor"/],
+    "aether-curator": ["runCuration", /proposeAll\(env, CURATOR,/],
+    "aether-calibrator": ["runCuration", /proposeAll\(env, CALIBRATOR,/],
+    "knowledge-council": ["runCouncil", /syscall\(env, "consensus\.propose"/]
+  };
+  assert.deepEqual(sorted(Object.keys(RUNS)), sorted(organ.agents.map((a) => a.id)), "every agent's run is known");
+  for (const a of organ.agents) {
+    const [fn, acts] = RUNS[a.id];
+    const module = anatomy.agents.find((x) => x.id === a.id).module;
+    const m = acts.exec(src[module]);
+    assert.ok(m, `${a.id}: acts in ${module}`);
+    assert.equal(enclosingFunction(src[module], m.index), fn, `${a.id}: acts inside ${fn}`);
+    const daily = calls.filter((c) => c.fn === fn && c.utc_hour !== null);
+    assert.equal(daily.length, 1, `${a.id}: ${fn} has one daily step`);
+    assert.deepEqual(a.schedule, { cron: `${minute} ${daily[0].utc_hour} * * *` }, `${a.id}: its schedule is ${fn}'s daily step (${daily[0].step})`);
+    assert.equal(schedulePeriodMs(a.schedule.cron), 24 * HOUR_MS, `${a.id}: daily`);
+  }
+  assert.notEqual(WRANGLER.vars?.KNOWLEDGE_COUNCIL, "off", "the council's schedule holds only while its session runs");
+  // The calibrator's trace: its run report goes out on the daily curation only, never on the carry runs.
+  assert.match(body, /await step\("curation", \(\) => runCuration\(env, \{ now, daily: true \}\)\)/);
+  assert.match(body, /await step\("curation_carry", \(\) => runCuration\(env, \{ now \}\)\)/);
+  const k = src["src/knowledge.mjs"];
+  const report = [...k.matchAll(/await publishCalibratorRun\(/g)].map((x) => enclosingFunction(k, x.index));
+  assert.deepEqual(report, ["runCuration"], "one calibrator run report, from runCuration");
+  assert.match(k, /const report = daily \? await publishCalibratorRun\(/, "only on the daily run");
 });
 
 test("D7. the entrypoints are exactly the Worker's exports and their methods", () => {
@@ -254,4 +326,32 @@ test("D7. the entrypoints are exactly the Worker's exports and their methods", (
   assert.match(def, /request\.method !== "GET" && request\.method !== "HEAD"/, "the fetch handler is read-only");
   assert.deepEqual(fetch.methods, ["GET", "HEAD"]);
   for (const e of anatomy.entrypoints) for (const c of e.callers ?? []) assert.match(c.service, /^(cryptophys|xauusd)-[a-z0-9-]+$/, `${e.name}: caller ${c.service}`);
+  // Owner 2026-11-14 ("naikan batas kapabilitas aether"): the platform Forge reads the DNA, dna() only.
+  assert.deepEqual(anatomy.entrypoints.find((e) => e.name === "OrganismDna"), { name: "OrganismDna", kind: "rpc", methods: ["dna"], callers: [{ service: "cryptophys-forge", binding: "EXT_ORGANISM_AETHER" }] });
+  assert.match(index, /^import ORGANISM from "\.\.\/organism\.json" with \{ type: "json" \};$/m, "the served DNA is the committed organism.json, bundled");
+  assert.match(index, /export class OrganismDna extends WorkerEntrypoint \{\n  async dna\(\) \{ return structuredClone\(ORGANISM\); \}\n\}\n/, "dna() is read-only: no binding, no write, no AI");
+});
+
+// The Worker's entrypoints, loaded in Node: cloudflare:workers is a stub base class (the Workers runtime's own is
+// not needed to call a method directly).
+const WORKERS_STUB = "data:text/javascript," + encodeURIComponent("export class WorkerEntrypoint { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }");
+registerHooks({ resolve: (specifier, context, next) => (specifier === "cloudflare:workers" ? { url: WORKERS_STUB, shortCircuit: true } : next(specifier, context)) });
+
+test("D8. OrganismDna.dna() serves exactly organism.json, schema-valid for the platform census, using no binding", async () => {
+  const { OrganismDna } = await import("../src/index.mjs");
+  // Any binding read throws: dna() uses none.
+  const env = new Proxy({}, { get: (_, k) => { throw new Error(`dna() read env.${String(k)}`); } });
+  const served = await new OrganismDna({}, env).dna();
+  assert.deepEqual(served, DNA, "dna() = organism.json as committed");
+  // What the platform's census accepts (organism.ts EXTERNAL_ORIGINS aether, externalOrgans).
+  assert.equal(served.schema, ORGANISM_SCHEMA);
+  assert.ok(Array.isArray(served.organs) && served.organs.length >= 1 && served.organs.length <= 20, "at most 20 organs are read");
+  for (const [i, o] of served.organs.entries()) {
+    parseDna(JSON.parse(JSON.stringify(o)), `served organs[${i}]`);
+    assert.equal(o.service, SERVICE, "a service of the aether origin");
+    assert.deepEqual([o.deploy_unit, o.access, o.rollback], [null, false, false], "no platform deploy unit, Access or rollback entry");
+  }
+  // A copy: a caller cannot change the module's DNA.
+  served.organs[0].agents.push({ id: "x" });
+  assert.deepEqual(await new OrganismDna({}, env).dna(), DNA);
 });

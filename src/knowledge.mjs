@@ -13,6 +13,7 @@
 import { CANON } from "./canon.generated.mjs";
 import { latestWeightingReport, weightingCandidate, WEIGHTING_FAMILY } from "./weighting.mjs";
 import { executionCuratorCandidates } from "./execution.mjs";
+import { ADVISORY } from "./guardian.mjs";
 
 export const ITEM_SCHEMA = "cryptophys.knowledge-item.v1";
 export const PACK_VERSION = "cryptophys.learned-pack.v1";
@@ -338,8 +339,28 @@ export async function syncReviews(env, { now = Date.now() } = {}) {
   return { status: "ok", ...changed };
 }
 
-/** Daily (and in the next hours while proposals are carried): the curator's and the calibrator's candidates, proposed for review. */
-export async function runCuration(env, { now = Date.now() } = {}) {
+/**
+ * The calibrator's trace of its daily run (owner 2026-11-14: "jangan pensiun aether calibrator karena cara kerjanya
+ * memang idle sampai jadwalnya kerja"). The platform judges an agent's idleness by what its kernel records (an
+ * action or a report); knowledge.status is a tier 0 read and is not recorded, so a day without a candidate would
+ * leave no trace. One reports.publish (info, counts only) per daily run, candidate or not; never on the carry
+ * runs. Sent once: a denial is final, with no retry (AGENTS.md rule 6).
+ */
+async function publishCalibratorRun(env, { now, cards, candidates, results }) {
+  const proposed = results.proposed, carried = results.carried;
+  return syscall(env, CALIBRATOR, "reports.publish", {
+    kind: "knowledge_audit", severity: "info",
+    subject: candidates ? `Calibrator run: ${candidates} candidate${candidates === 1 ? "" : "s"}, ${proposed} proposed, ${carried} carried` : `Calibrator run: no candidate in ${cards} cards`,
+    ai_status: "deterministic",
+    body: { advisory: ADVISORY, run_at: new Date(now).toISOString(), cards, candidates, proposed, carried, skipped: results.skipped, refused: results.refused, stopped: results.stopped }
+  });
+}
+
+/**
+ * Daily at 02:52 UTC (`daily: true`), and in the next hours while proposals are carried: the curator's and the
+ * calibrator's candidates, proposed for review. The daily run ends with the calibrator's run report.
+ */
+export async function runCuration(env, { now = Date.now(), daily = false } = {}) {
   const db = env.AETHER_DB;
   if (!db) return { status: "unavailable" };
   await ensureSchema(db);
@@ -373,7 +394,8 @@ export async function runCuration(env, { now = Date.now() } = {}) {
   const carried = [curator, calibrator].reduce((n, r) => n + (r.stopped ? 0 : r.carried), 0);
   await db.prepare("INSERT INTO aether_meta (key, value, updated_at) VALUES ('curation_carried', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
     .bind(String(carried), new Date(now).toISOString()).run();
-  return { status: "ok", cards: cards.length, candidates: { curator: curatorCandidates.length, calibrator: calibratorCandidates.length }, curator, calibrator };
+  const report = daily ? await publishCalibratorRun(env, { now, cards: cards.length, candidates: calibratorCandidates.length, results: calibrator }) : null;
+  return { status: "ok", cards: cards.length, candidates: { curator: curatorCandidates.length, calibrator: calibratorCandidates.length }, curator, calibrator, ...(daily ? { calibrator_report: report?.outcome ?? null } : {}) };
 }
 
 /** Text kinds xauusd can test in shadow by itself (its shadow knowledge arm). */

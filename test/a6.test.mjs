@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { ingestCards, resetSchemaCacheForTests } from "../src/store.mjs";
+import { ingestCards, ensureSchema, resetSchemaCacheForTests } from "../src/store.mjs";
 import {
   binomialTail, roleDriftCandidates, cautionCandidates, stuckEpisodes, paramCandidates, runCuration, syncReviews, learnedPack, knowledgeCounts,
   resetKnowledgeSchemaCacheForTests, TUNING_GRID, ITEM_SCHEMA, KERNEL_PROPOSE_QUOTA, curationCarried
@@ -37,11 +37,16 @@ const card = (chart, ms, extra = {}) => ({
 const hourly = (days, fn = () => ({})) => Array.from({ length: days * 24 }, (_, i) => { const ms = NOW - (days * 24 - i) * H; return card("60", ms, fn(i, ms)); });
 
 // The platform kernel's knowledge.propose / knowledge.status, as far as Aether sees them.
-function kernel({ deny = false, refuse = [] } = {}) {
-  const proposals = [];
+function kernel({ deny = false, refuse = [], denyReports = false } = {}) {
+  const proposals = [], reports = [];
   return {
-    proposals,
+    proposals, reports,
     async syscall(agentId, capability, input) {
+      if (capability === "reports.publish") {
+        reports.push({ agent: agentId, ...input });
+        if (denyReports) return { outcome: "denied", capability, reason: "failed: kill_switch" };
+        return { outcome: "succeeded", capability, result: { report_id: `rpt_${reports.length}`, agent_id: agentId } };
+      }
       if (capability === "knowledge.propose") {
         if (deny) return { outcome: "denied", capability, reason: "failed: rate_limit" };
         if (refuse.includes(input.item.item_id)) return { outcome: "failed", capability, reason: "invalid_knowledge_item: text_price_like_number" };
@@ -168,6 +173,63 @@ test("owner 2026-11-14: every candidate is proposed (beyond the old 3 a run), pa
   assert.deepEqual([next.curator.proposed, next.curator.carried, next.curator.skipped], [3, 0, 6], "once the window has passed, the rest is proposed");
   assert.equal(await curationCarried(env), false);
   assert.equal(new Set(k.proposals.map((p) => p.item_id)).size, 9, "all nine proposed, none twice, none dropped");
+});
+
+test("owner 2026-11-14: the calibrator leaves one recorded report per daily run, with or without a candidate; none on the carry runs", async () => {
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const db = d1();
+  // Curator candidates only (role drift): the calibrator has nothing to propose.
+  const cards = hourly(7, (i) => ({ compliance: i % 8 === 0 ? [{ agent: "r37_funnel", check: "calibration_talk" }] : [] }));
+  for (let i = 0; i < cards.length; i += 50) await ingestCards(db, cards.slice(i, i + 50), { now: NOW });
+  const k = kernel();
+  const env = { AETHER_DB: db, AGENTS: k };
+  const run = await runCuration(env, { now: NOW, daily: true });
+  assert.equal(run.candidates.calibrator, 0);
+  assert.equal(run.curator.proposed, 1);
+  assert.equal(run.calibrator_report, "succeeded");
+  assert.equal(k.reports.length, 1, "exactly one report");
+  assert.deepEqual(k.reports[0], {
+    agent: "aether-calibrator", kind: "knowledge_audit", severity: "info", subject: `Calibrator run: no candidate in ${cards.length} cards`, ai_status: "deterministic",
+    body: { advisory: "advisory only; not an order", run_at: new Date(NOW).toISOString(), cards: cards.length, candidates: 0, proposed: 0, carried: 0, skipped: 0, refused: 0, stopped: null }
+  });
+  // A carry run (not daily) reports nothing; the next daily run reports once again.
+  const carry = await runCuration(env, { now: NOW + H });
+  assert.equal(carry.calibrator_report, undefined);
+  assert.equal(k.reports.length, 1);
+  await runCuration(env, { now: NOW + 24 * H, daily: true });
+  assert.equal(k.reports.length, 2, "one report per daily run");
+  assert.deepEqual(k.reports.map((r) => r.agent), ["aether-calibrator", "aether-calibrator"], "the curator publishes no run report");
+
+  // With no card at all, and with a candidate: still exactly one report, counts only.
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const empty = kernel(), emptyDb = d1();
+  await ensureSchema(emptyDb);
+  const none = await runCuration({ AETHER_DB: emptyDb, AGENTS: empty }, { now: NOW, daily: true });
+  assert.equal(none.cards, 0);
+  assert.deepEqual(empty.reports.map((r) => [r.agent, r.severity, r.body.cards, r.body.candidates]), [["aether-calibrator", "info", 0, 0]]);
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const withCandidate = d1();
+  const stuck = hourly(7, (i) => ({ stuck_open: (i % 40) < 6 ? [{ field: "prophet_r37.structure_subtype", candles: 9 }] : [] }));
+  for (let i = 0; i < stuck.length; i += 50) await ingestCards(withCandidate, stuck.slice(i, i + 50), { now: NOW });
+  const k2 = kernel();
+  await runCuration({ AETHER_DB: withCandidate, AGENTS: k2 }, { now: NOW, daily: true });
+  assert.equal(k2.reports.length, 1);
+  assert.equal(k2.reports[0].subject, "Calibrator run: 1 candidate, 1 proposed, 0 carried");
+  assert.deepEqual([k2.reports[0].body.candidates, k2.reports[0].body.proposed, k2.reports[0].body.carried], [1, 1, 0]);
+  assert.doesNotMatch(JSON.stringify(k2.reports[0]), /[0-9]{4}\.[0-9]|price|level|lot/i, "counts only, never a price");
+
+  // A denial is final (AGENTS.md rule 6): sent once, never retried.
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const denied = kernel({ denyReports: true }), deniedDb = d1();
+  await ensureSchema(deniedDb);
+  const r = await runCuration({ AETHER_DB: deniedDb, AGENTS: denied }, { now: NOW, daily: true });
+  assert.equal(r.calibrator_report, "denied");
+  assert.equal(denied.reports.length, 1, "no retry");
+  // Without the kernel binding nothing throws.
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const unbound = d1();
+  await ensureSchema(unbound);
+  assert.equal((await runCuration({ AETHER_DB: unbound }, { now: NOW, daily: true })).calibrator_report, "unavailable");
 });
 
 test("reviews come back through knowledge.status; approved items form the learned pack, labelled and shadow-only", async () => {
