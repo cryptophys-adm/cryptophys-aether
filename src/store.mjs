@@ -32,15 +32,16 @@ export async function ensureSchema(db) {
   ready = true;
 }
 
-export const MAX_CARDS_PER_CALL = 50;
-
 /**
  * Stores decision cards. A card is refused when it fails the guard (version, shape, any level or
- * price). A known card is updated in place (its outcomes arrive after its horizon closes).
+ * price). A known card is updated in place (its outcomes arrive after its horizon closes). Every card of
+ * a call is stored: none is truncated (owner 2026-11-14: learning is never limited; until then a call kept
+ * its first 50 cards and dropped the rest, which xauusd, sending 50 a call, never hit). `truncated` stays
+ * in the answer, always 0, for callers of the old shape.
  */
 export async function ingestCards(db, cards, { now = Date.now() } = {}) {
   await ensureSchema(db);
-  const list = Array.isArray(cards) ? cards.slice(0, MAX_CARDS_PER_CALL) : [];
+  const list = Array.isArray(cards) ? cards : [];
   const at = new Date(now).toISOString();
   let accepted = 0;
   const rejected = [];
@@ -51,7 +52,7 @@ export async function ingestCards(db, cards, { now = Date.now() } = {}) {
       .bind(card.card_id, card.chart, card.kind, card.bar_open, JSON.stringify(card), CANON.content_sha256, at, at).run();
     accepted += 1;
   }
-  const truncated = Array.isArray(cards) && cards.length > MAX_CARDS_PER_CALL ? cards.length - MAX_CARDS_PER_CALL : 0;
+  const truncated = 0;
   await db.prepare("INSERT INTO ingest_log (received_at, accepted, rejected, detail) VALUES (?, ?, ?, ?)").bind(at, accepted, rejected.length, JSON.stringify({ rejected: rejected.slice(0, 10), truncated })).run();
   return { accepted, rejected, truncated, canon: { version: CANON.version, content_sha256: CANON.content_sha256 } };
 }

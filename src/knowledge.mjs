@@ -18,8 +18,14 @@ export const ITEM_SCHEMA = "cryptophys.knowledge-item.v1";
 export const PACK_VERSION = "cryptophys.learned-pack.v1";
 export const CURATOR = "aether-curator";
 export const CALIBRATOR = "aether-calibrator";
-/** At most this many proposals per agent per run (the kernel allows 6 an hour and 20 a day). */
-export const MAX_PROPOSALS_PER_RUN = 3;
+/**
+ * The platform kernel's own quota for knowledge.propose, per agent (cryptophys-cloud-platform:
+ * control-plane-shared/src/capabilities.ts max_per_hour 6; ai-kernel/src/knowledge.ts KNOWLEDGE_MAX_PER_DAY 20).
+ * Mirrored, not Aether's cap: Aether has no proposal limit of its own (owner 2026-11-14: "learning tidak boleh
+ * dibatasi siapa pun, itu adalah mandat tertinggi"; until then it stopped at 3 a run). It paces to the kernel's
+ * quota so that no proposal is denied, and carries the rest to the next hour (curationCarried); nothing is dropped.
+ */
+export const KERNEL_PROPOSE_QUOTA = Object.freeze({ per_hour: 6, per_day: 20 });
 /** A rejected item is not proposed again for this long. */
 export const REJECTED_COOLDOWN_MS = 14 * 86_400_000;
 
@@ -64,7 +70,9 @@ export const KNOWLEDGE_SCHEMA_SQL = Object.freeze([
     updated_at TEXT NOT NULL,
     PRIMARY KEY (item_id, version)
   )`,
-  "CREATE INDEX IF NOT EXISTS idx_knowledge_items_status ON knowledge_items(status, updated_at)"
+  "CREATE INDEX IF NOT EXISTS idx_knowledge_items_status ON knowledge_items(status, updated_at)",
+  // The same table src/indexes.mjs creates: here it holds the carried proposals (key curation_carried).
+  "CREATE TABLE IF NOT EXISTS aether_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
 ]);
 let ready = false;
 export function resetKnowledgeSchemaCacheForTests() { ready = false; }
@@ -249,14 +257,31 @@ async function mayPropose(db, itemId, now) {
   return { ok: true, version: Number(last.version) + 1 };
 }
 
+/**
+ * How many more proposals the kernel accepts from `agentId` now (its hourly and daily quota, as Aether recorded
+ * them). The hour is inclusive (>=): the kernel counts in real time, so a proposal made at the previous :52 may
+ * still be inside its window at this :52; Aether then waits one more hour rather than ask for a denial.
+ */
+async function kernelRoom(db, agentId, now) {
+  const hour = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND created_at >= ?").bind(agentId, new Date(now - 3_600_000).toISOString()).first();
+  const day = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND proposal_id IS NOT NULL AND created_at >= ?").bind(agentId, new Date(now).toISOString().slice(0, 10) + "T00:00:00.000Z").first();
+  return Math.max(0, Math.min(KERNEL_PROPOSE_QUOTA.per_hour - (Number(hour?.n) || 0), KERNEL_PROPOSE_QUOTA.per_day - (Number(day?.n) || 0)));
+}
+
+/**
+ * Proposes every candidate that may be proposed. None is held back by a limit of Aether's own: past the
+ * kernel's quota a candidate is `carried` (proposed in a later hour; candidates are drawn again from the
+ * cards each run, so carrying never loses one).
+ */
 async function proposeAll(env, agentId, candidates, now) {
   const db = env.AETHER_DB;
   const at = new Date(now).toISOString();
-  const results = { proposed: 0, refused: 0, skipped: 0, stopped: null };
+  const results = { proposed: 0, refused: 0, skipped: 0, carried: 0, stopped: null };
+  let room = await kernelRoom(db, agentId, now);
   for (const candidate of candidates) {
-    if (results.proposed + results.refused >= MAX_PROPOSALS_PER_RUN) break;
     const gate = await mayPropose(db, candidate.item_id, now);
     if (!gate.ok) { results.skipped += 1; continue; }
+    if (results.stopped || room <= 0) { results.carried += 1; continue; }
     const item = { ...candidate, version: gate.version };
     const r = await syscall(env, agentId, "knowledge.propose", { item });
     if (r?.outcome === "succeeded") {
@@ -264,18 +289,32 @@ async function proposeAll(env, agentId, candidates, now) {
       await db.prepare("INSERT INTO knowledge_items (item_id, version, kind, agent_id, item_json, status, proposal_id, content_sha256, detail, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, NULL, ?, ?)")
         .bind(item.item_id, item.version, item.kind, agentId, JSON.stringify(item), p.proposal_id ?? null, p.content_sha256 ?? null, at, at).run();
       results.proposed += 1;
+      room -= 1;
     } else if (r?.outcome === "failed" && /invalid_knowledge_item|knowledge_item_version_exists/.test(String(r.reason))) {
       // The kernel refused this content: kept so the same version is never sent again.
       await db.prepare("INSERT OR REPLACE INTO knowledge_items (item_id, version, kind, agent_id, item_json, status, proposal_id, content_sha256, detail, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'refused', NULL, NULL, ?, ?, ?)")
         .bind(item.item_id, item.version, item.kind, agentId, JSON.stringify(item), String(r.reason).slice(0, 300), at, at).run();
       results.refused += 1;
+      room -= 1;
     } else {
-      // A denial (rate limit, kill switch, suspension) or a transport failure: final for this run, no retry.
+      // A denial (kill switch, suspension, a quota Aether did not see) or a transport failure: final for this
+      // run, no retry (AGENTS.md rule 6). The rest waits for the next daily curation, not the next hour.
       results.stopped = r?.outcome === "denied" ? `denied: ${String(r.reason ?? "").slice(0, 120)}` : (r?.outcome ?? "failed");
-      break;
+      results.carried += 1;
     }
   }
   return results;
+}
+
+/** Whether the last curation run left proposals for the next hour (the kernel's quota, not a denial). Never throws. */
+export async function curationCarried(env) {
+  const db = env.AETHER_DB;
+  if (!db) return false;
+  try {
+    await ensureSchema(db);
+    const row = await db.prepare("SELECT value FROM aether_meta WHERE key = 'curation_carried'").first();
+    return Number(row?.value) > 0;
+  } catch { return false; }
 }
 
 /** Follows the review of every open proposal (knowledge.status, tier 0) and records the decisions. */
@@ -299,7 +338,7 @@ export async function syncReviews(env, { now = Date.now() } = {}) {
   return { status: "ok", ...changed };
 }
 
-/** Daily: the curator's and the calibrator's candidates, proposed for review. */
+/** Daily (and in the next hours while proposals are carried): the curator's and the calibrator's candidates, proposed for review. */
 export async function runCuration(env, { now = Date.now() } = {}) {
   const db = env.AETHER_DB;
   if (!db) return { status: "unavailable" };
@@ -330,6 +369,10 @@ export async function runCuration(env, { now = Date.now() } = {}) {
   if (weighting) calibratorCandidates.unshift(weighting);
   const curator = await proposeAll(env, CURATOR, curatorCandidates, now);
   const calibrator = await proposeAll(env, CALIBRATOR, calibratorCandidates, now);
+  // Carried past the kernel's quota: the next hour runs again. After a denial it waits for the next day (rule 6).
+  const carried = [curator, calibrator].reduce((n, r) => n + (r.stopped ? 0 : r.carried), 0);
+  await db.prepare("INSERT INTO aether_meta (key, value, updated_at) VALUES ('curation_carried', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+    .bind(String(carried), new Date(now).toISOString()).run();
   return { status: "ok", cards: cards.length, candidates: { curator: curatorCandidates.length, calibrator: calibratorCandidates.length }, curator, calibrator };
 }
 

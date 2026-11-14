@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { ingestCards, resetSchemaCacheForTests } from "../src/store.mjs";
 import {
   binomialTail, roleDriftCandidates, cautionCandidates, stuckEpisodes, paramCandidates, runCuration, syncReviews, learnedPack, knowledgeCounts,
-  resetKnowledgeSchemaCacheForTests, TUNING_GRID, ITEM_SCHEMA, MAX_PROPOSALS_PER_RUN
+  resetKnowledgeSchemaCacheForTests, TUNING_GRID, ITEM_SCHEMA, KERNEL_PROPOSE_QUOTA, curationCarried
 } from "../src/knowledge.mjs";
 import { CANON } from "../src/canon.generated.mjs";
 
@@ -142,7 +142,32 @@ test("runCuration proposes through the kernel, never twice, records refusals, an
   for (let i = 0; i < cards.length; i += 50) await ingestCards(fresh, cards.slice(i, i + 50), { now: NOW });
   const denied = await runCuration({ AETHER_DB: fresh, AGENTS: kernel({ deny: true }) }, { now: NOW });
   assert.match(String(denied.curator.stopped), /^denied/, "a denial is final for the run");
-  assert.ok(MAX_PROPOSALS_PER_RUN <= 6);
+  assert.ok(denied.curator.carried >= 1, "the denied candidates are not dropped: the next daily run draws them again");
+  assert.equal(await curationCarried({ AETHER_DB: fresh }), false, "after a denial nothing is retried in the next hour (rule 6)");
+  assert.deepEqual({ ...KERNEL_PROPOSE_QUOTA }, { per_hour: 6, per_day: 20 }, "the kernel's quota, mirrored");
+});
+
+test("owner 2026-11-14: every candidate is proposed (beyond the old 3 a run), paced to the kernel's quota, the rest carried to the next hour", async () => {
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const db = d1();
+  const checks = ["calibration_talk", "data_scope", "natural_language"];
+  const cards = hourly(7, (i) => ({ compliance: i % 8 === 0 ? ["r37_funnel", "prophet", "moderator"].flatMap((agent) => checks.map((check) => ({ agent, check }))) : [] }));
+  for (let i = 0; i < cards.length; i += 50) await ingestCards(db, cards.slice(i, i + 50), { now: NOW });
+  const k = kernel();
+  const env = { AETHER_DB: db, AGENTS: k };
+  const first = await runCuration(env, { now: NOW });
+  assert.equal(first.candidates.curator, 9);
+  assert.deepEqual([first.curator.proposed, first.curator.carried, first.curator.stopped], [KERNEL_PROPOSE_QUOTA.per_hour, 3, null], "6 proposed (the kernel's hourly quota, not 3), 3 carried");
+  assert.equal(await curationCarried(env), true, "the next hour runs again");
+  const sameHour = await runCuration(env, { now: NOW + 10 * 60_000 });
+  assert.deepEqual([sameHour.curator.proposed, sameHour.curator.carried], [0, 3], "within the hour the quota is spent: carried, no denial asked for");
+  assert.equal(k.proposals.length, 6);
+  // At the next :52 the kernel's one-hour window (real time) can still hold the first six: no call is risked.
+  assert.equal((await runCuration(env, { now: NOW + 3_600_000 })).curator.carried, 3);
+  const next = await runCuration(env, { now: NOW + 2 * 3_600_000 });
+  assert.deepEqual([next.curator.proposed, next.curator.carried, next.curator.skipped], [3, 0, 6], "once the window has passed, the rest is proposed");
+  assert.equal(await curationCarried(env), false);
+  assert.equal(new Set(k.proposals.map((p) => p.item_id)).size, 9, "all nine proposed, none twice, none dropped");
 });
 
 test("reviews come back through knowledge.status; approved items form the learned pack, labelled and shadow-only", async () => {

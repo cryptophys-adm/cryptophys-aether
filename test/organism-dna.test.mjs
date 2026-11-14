@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { CURATOR, CALIBRATOR } from "../src/knowledge.mjs";
 import { COUNCIL_AGENT, COUNCIL_HOUR_UTC } from "../src/doctrine.mjs";
 import { EMBED_MODEL, EMBED_DIMENSIONS, EMBED_BATCH } from "../src/embed.mjs";
-import { DEFAULT_DAILY_LIMIT } from "../src/budget.mjs";
+import { USAGE_TABLE, USAGE_UNIT } from "../src/usage.mjs";
 import { INDEXES } from "../scripts/ensure-vectorize.mjs";
 
 const root = new URL("../", import.meta.url);
@@ -162,7 +162,11 @@ test("D3. the AI engines and models are every Workers AI call in the code", () =
   for (const r of runs) {
     assert.equal(r.model, "EMBED_MODEL", `${r.f}:${r.fn} calls Workers AI with ${r.model}`);
     const m = anatomy.models.find((x) => x.task === snake(r.fn));
-    assert.deepEqual({ binding: m.binding, model: m.model, dimensions: m.dimensions, batch: m.batch, budget: m.budget }, { binding: "AI", model: EMBED_MODEL, dimensions: EMBED_DIMENSIONS, batch: EMBED_BATCH, budget: { var: "AI_DAILY_LIMIT", default: DEFAULT_DAILY_LIMIT } });
+    // Owner 2026-11-14 ("learning tidak boleh dibatasi siapa pun"): no budget, every request metered in ai_usage.
+    assert.deepEqual({ binding: m.binding, model: m.model, dimensions: m.dimensions, batch: m.batch, budget: m.budget, metering: m.metering }, { binding: "AI", model: EMBED_MODEL, dimensions: EMBED_DIMENSIONS, batch: EMBED_BATCH, budget: null, metering: { table: USAGE_TABLE, unit: USAGE_UNIT, per: "utc_day", module: "src/usage.mjs" } });
+    assert.ok(anatomy.storage.d1[0].tables.includes(m.metering.table), "the metering table is in D1");
+    const engine = read(r.f);
+    assert.match(engine, /await recordUsage\(env, 1, \{ now \}\);\s*const res = await env\.AI\.run\(/, `${r.f}: every Workers AI request is metered first`);
     // The callers of the engine function.
     const callers = SRC.flatMap(({ text }) => [...text.matchAll(new RegExp(`await ${r.fn}\\(`, "g"))].map((x) => enclosingFunction(text, x.index)));
     assert.deepEqual(sorted(m.used_by), sorted(new Set(callers)), `${m.task}: used_by`);
