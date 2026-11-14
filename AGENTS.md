@@ -10,6 +10,14 @@ Aether is the Knowledge Guardian cluster of the Cryptophys AI Mesh. Design: RFC_
 6. **Platform kernel rules.** Reports are `info` or `warning`, never `critical`. A denial is final: no retry, no switching agent ids. Never change `host_worker`.
 7. **Aether never writes to xauusd** (its repository, D1, KV or Workers).
 
+## How agents may change Aether
+Owner 2026-11-14: "ya, Aether perlu DNA, tes CI, dan file yang dilindungi sendiri lebih dulu sebelum boleh diubah oleh agen".
+- **Read-only until the bootstrap is merged.** Until the owner merges the PR that adds `organism.json`, `guard-paths.json` and their tests, agents only read Aether: no commit, branch or PR here by an agent other than that bootstrap PR itself.
+- **Only through this repository's CI.** Every change is a PR whose `ci` workflow passes, the DNA tests included (`test/organism-dna.test.mjs`: `organism.json` equals `wrangler.jsonc` and `src/`). A new binding, cron, agent, AI model or entrypoint needs its line in `organism.json` in the same PR.
+- **Guard paths need the owner.** A change that touches a path in `guard-paths.json` (the doctrine and canon, the DNA and this list, the CI workflows and test config, the entrypoints in `src/index.mjs`, `wrangler.jsonc`, the deploy scripts, these rules) is merged only by the owner's click or merge, never by an agent or by consensus alone.
+- **No fund movement.** Nothing in Aether moves funds, places orders or reaches a broker (rule 1).
+- **Doctrine changes go through the Knowledge Council.** An operational doctrine value changes only by the council's proposal and Cerebrum's execution (`docs/DOCTRINE_PROTOCOL.md`), folded into the canon by a reviewed PR (rule 4); no agent edits a doctrine rule directly.
+
 ## Before opening a PR
 - `npm test` (it includes the canon staleness check).
 - `npx wrangler@4.45.0 deploy --dry-run` (CI runs it too).

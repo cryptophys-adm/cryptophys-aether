@@ -1,0 +1,22 @@
+{
+  "$comment": "Aether's guard paths (owner 2026-11-14), in the style of the platform's CRITICAL_PATHS (cryptophys-cloud-platform workers/control-plane-shared/src/guard-paths.ts): a change that touches a path matched here needs the owner's click or merge (AGENTS.md, \"How agents may change Aether\"). Each pattern is a JavaScript regular expression over the repository-relative path; the first match gives the reason. test/guard-paths.test.mjs checks that every pattern matches real files. This file is itself a guard path.",
+  "schema": "aether-guard-paths.v1",
+  "paths": [
+    { "pattern": "^canon/", "reason": "doctrine_canon" },
+    { "pattern": "^src/canon\\.generated\\.mjs$", "reason": "doctrine_canon" },
+    { "pattern": "^src/doctrine\\.mjs$", "reason": "doctrine_canon" },
+    { "pattern": "^scripts/(build-canon|sync-canon-kb)\\.mjs$", "reason": "doctrine_canon" },
+    { "pattern": "^docs/DOCTRINE_PROTOCOL\\.md$", "reason": "doctrine_canon" },
+    { "pattern": "^src/card-guard\\.mjs$", "reason": "advisory_boundary" },
+    { "pattern": "^organism\\.json$", "reason": "dna" },
+    { "pattern": "^guard-paths\\.json$", "reason": "dna" },
+    { "pattern": "^\\.github/workflows/", "reason": "ci_workflows" },
+    { "pattern": "^package\\.json$", "reason": "test_config" },
+    { "pattern": "^test/(organism-dna|guard-paths|canon)\\.test\\.mjs$", "reason": "test_config" },
+    { "pattern": "^src/index\\.mjs$", "reason": "auth_access" },
+    { "pattern": "^wrangler\\.jsonc$", "reason": "wrangler_config" },
+    { "pattern": "^scripts/(check-deployment|ensure-vectorize)\\.mjs$", "reason": "deploy" },
+    { "pattern": "^\\.gitignore$", "reason": "secrets" },
+    { "pattern": "^(AGENTS|CLAUDE)\\.md$", "reason": "agent_rules" }
+  ]
+}
