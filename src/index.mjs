@@ -16,8 +16,8 @@
 //   cron :52 every hour (phase A4): canon sync into aether-canon (once per canon version), card
 //   embedding into aether-market, the review status of open knowledge proposals; at 01:52 UTC the
 //   guardian and auditor digest to the kernel; at 02:52 UTC the curator and calibrator propose (A6), and
-//   in the next hours again while the kernel's hourly quota left proposals over; the calibrator reports its
-//   daily run; at 03:52 UTC the Knowledge Council.
+//   in the next hours again while the kernel's hourly quota left proposals over; the curator and the calibrator
+//   each report their daily run; at 03:52 UTC the Knowledge Council.
 // No secret anywhere: callers reach the RPC only through a Service Binding in this account.
 // Advisory only. Aether never writes to the xauusd repository or its data.
 import { WorkerEntrypoint } from "cloudflare:workers";

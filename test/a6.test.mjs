@@ -175,7 +175,7 @@ test("owner 2026-11-14: every candidate is proposed (beyond the old 3 a run), pa
   assert.equal(new Set(k.proposals.map((p) => p.item_id)).size, 9, "all nine proposed, none twice, none dropped");
 });
 
-test("owner 2026-11-14: the calibrator leaves one recorded report per daily run, with or without a candidate; none on the carry runs", async () => {
+test("owner 2026-11-14: the curator and the calibrator each leave one recorded report per daily run, with or without a candidate; none on the carry runs", async () => {
   resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
   const db = d1();
   // Curator candidates only (role drift): the calibrator has nothing to propose.
@@ -186,19 +186,24 @@ test("owner 2026-11-14: the calibrator leaves one recorded report per daily run,
   const run = await runCuration(env, { now: NOW, daily: true });
   assert.equal(run.candidates.calibrator, 0);
   assert.equal(run.curator.proposed, 1);
-  assert.equal(run.calibrator_report, "succeeded");
-  assert.equal(k.reports.length, 1, "exactly one report");
-  assert.deepEqual(k.reports[0], {
+  assert.deepEqual([run.curator_report, run.calibrator_report], ["succeeded", "succeeded"]);
+  assert.equal(k.reports.length, 2, "exactly one report per agent");
+  assert.deepEqual(k.reports, [{
+    agent: "aether-curator", kind: "knowledge_audit", severity: "info", subject: "Curator run: 1 candidate, 1 proposed, 0 carried", ai_status: "deterministic",
+    body: { advisory: "advisory only; not an order", run_at: new Date(NOW).toISOString(), cards: cards.length, candidates: 1, proposed: 1, carried: 0, skipped: 0, refused: 0, stopped: null }
+  }, {
     agent: "aether-calibrator", kind: "knowledge_audit", severity: "info", subject: `Calibrator run: no candidate in ${cards.length} cards`, ai_status: "deterministic",
     body: { advisory: "advisory only; not an order", run_at: new Date(NOW).toISOString(), cards: cards.length, candidates: 0, proposed: 0, carried: 0, skipped: 0, refused: 0, stopped: null }
-  });
+  }]);
   // A carry run (not daily) reports nothing; the next daily run reports once again.
   const carry = await runCuration(env, { now: NOW + H });
+  assert.equal(carry.curator_report, undefined);
   assert.equal(carry.calibrator_report, undefined);
-  assert.equal(k.reports.length, 1);
+  assert.equal(k.reports.length, 2);
   await runCuration(env, { now: NOW + 24 * H, daily: true });
-  assert.equal(k.reports.length, 2, "one report per daily run");
-  assert.deepEqual(k.reports.map((r) => r.agent), ["aether-calibrator", "aether-calibrator"], "the curator publishes no run report");
+  assert.equal(k.reports.length, 4, "one report per agent per daily run");
+  assert.deepEqual(k.reports.map((r) => r.agent), ["aether-curator", "aether-calibrator", "aether-curator", "aether-calibrator"]);
+  assert.deepEqual(k.reports.slice(2).map((r) => [r.severity, r.body.run_at, r.body.proposed]), [["info", new Date(NOW + 24 * H).toISOString(), 0], ["info", new Date(NOW + 24 * H).toISOString(), 0]]);
 
   // With no card at all, and with a candidate: still exactly one report, counts only.
   resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
@@ -206,30 +211,30 @@ test("owner 2026-11-14: the calibrator leaves one recorded report per daily run,
   await ensureSchema(emptyDb);
   const none = await runCuration({ AETHER_DB: emptyDb, AGENTS: empty }, { now: NOW, daily: true });
   assert.equal(none.cards, 0);
-  assert.deepEqual(empty.reports.map((r) => [r.agent, r.severity, r.body.cards, r.body.candidates]), [["aether-calibrator", "info", 0, 0]]);
+  assert.deepEqual(empty.reports.map((r) => [r.agent, r.severity, r.subject, r.body.cards, r.body.candidates]), [["aether-curator", "info", "Curator run: no candidate in 0 cards", 0, 0], ["aether-calibrator", "info", "Calibrator run: no candidate in 0 cards", 0, 0]], "the curator reports a run with no candidate too");
   resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
   const withCandidate = d1();
   const stuck = hourly(7, (i) => ({ stuck_open: (i % 40) < 6 ? [{ field: "prophet_r37.structure_subtype", candles: 9 }] : [] }));
   for (let i = 0; i < stuck.length; i += 50) await ingestCards(withCandidate, stuck.slice(i, i + 50), { now: NOW });
   const k2 = kernel();
   await runCuration({ AETHER_DB: withCandidate, AGENTS: k2 }, { now: NOW, daily: true });
-  assert.equal(k2.reports.length, 1);
-  assert.equal(k2.reports[0].subject, "Calibrator run: 1 candidate, 1 proposed, 0 carried");
-  assert.deepEqual([k2.reports[0].body.candidates, k2.reports[0].body.proposed, k2.reports[0].body.carried], [1, 1, 0]);
-  assert.doesNotMatch(JSON.stringify(k2.reports[0]), /[0-9]{4}\.[0-9]|price|level|lot/i, "counts only, never a price");
+  assert.deepEqual(k2.reports.map((r) => r.subject), ["Curator run: no candidate in " + stuck.length + " cards", "Calibrator run: 1 candidate, 1 proposed, 0 carried"]);
+  assert.deepEqual([k2.reports[1].body.candidates, k2.reports[1].body.proposed, k2.reports[1].body.carried], [1, 1, 0]);
+  assert.doesNotMatch(JSON.stringify(k2.reports), /[0-9]{4}\.[0-9]|price|level|lot/i, "counts only, never a price");
 
   // A denial is final (AGENTS.md rule 6): sent once, never retried.
   resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
   const denied = kernel({ denyReports: true }), deniedDb = d1();
   await ensureSchema(deniedDb);
   const r = await runCuration({ AETHER_DB: deniedDb, AGENTS: denied }, { now: NOW, daily: true });
-  assert.equal(r.calibrator_report, "denied");
-  assert.equal(denied.reports.length, 1, "no retry");
+  assert.deepEqual([r.curator_report, r.calibrator_report], ["denied", "denied"]);
+  assert.deepEqual(denied.reports.map((x) => x.agent), ["aether-curator", "aether-calibrator"], "each sent once, no retry");
   // Without the kernel binding nothing throws.
   resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
   const unbound = d1();
   await ensureSchema(unbound);
-  assert.equal((await runCuration({ AETHER_DB: unbound }, { now: NOW, daily: true })).calibrator_report, "unavailable");
+  const u = await runCuration({ AETHER_DB: unbound }, { now: NOW, daily: true });
+  assert.deepEqual([u.curator_report, u.calibrator_report], ["unavailable", "unavailable"]);
 });
 
 test("reviews come back through knowledge.status; approved items form the learned pack, labelled and shadow-only", async () => {

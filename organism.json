@@ -205,7 +205,7 @@
       "agents": [
         { "id": "aether-guardian", "module": "src/guardian.mjs", "uses": ["reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0027" },
         { "id": "aether-auditor", "module": "src/guardian.mjs", "uses": ["reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0027" },
-        { "id": "aether-curator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
+        { "id": "aether-curator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
         { "id": "aether-calibrator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
         { "id": "knowledge-council", "module": "src/doctrine.mjs", "uses": ["consensus.propose", "doctrine.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0045" }
       ]

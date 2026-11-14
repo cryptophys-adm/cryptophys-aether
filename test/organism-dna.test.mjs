@@ -167,9 +167,9 @@ test("D2. the agents are exactly those the code acts as on the kernel, each usin
   assert.deepEqual(sorted(new Set(agentArgs)), ["CALIBRATOR", "CURATOR"], "knowledge.mjs acts only as the curator and the calibrator");
   for (const id of [CURATOR, CALIBRATOR]) add(id, caps(k, /syscall\(env, agentId, "([a-z]+\.[a-z_]+)"/g));
   // syscall(env, CURATOR | CALIBRATOR, "<capability>"): as that agent only. Owner 2026-11-14 ("jangan pensiun aether
-  // calibrator karena cara kerjanya memang idle sampai jadwalnya kerja"): the calibrator's daily run report is the one.
+  // calibrator karena cara kerjanya memang idle sampai jadwalnya kerja"): the curator's and the calibrator's daily run reports.
   const named = [...k.matchAll(/syscall\(env, (CURATOR|CALIBRATOR), "([a-z]+\.[a-z_]+)"/g)].map((m) => ({ site: `${enclosingFunction(k, m.index)}:${m[1]}:${m[2]}`, id: m[1] === "CURATOR" ? CURATOR : CALIBRATOR, capability: m[2] }));
-  assert.deepEqual(named.map((x) => x.site), ["publishCalibratorRun:CALIBRATOR:reports.publish"], "the syscalls knowledge.mjs makes as a named agent");
+  assert.deepEqual(named.map((x) => x.site), ["publishCuratorRun:CURATOR:reports.publish", "publishCalibratorRun:CALIBRATOR:reports.publish"], "the syscalls knowledge.mjs makes as a named agent");
   for (const x of named) add(x.id, [x.capability]);
   const calls = [...k.matchAll(/(?<!function )\bsyscall\(env, /g)].length;
   assert.equal([...k.matchAll(/(?<!function )\bsyscall\(env, (?:agentId|CURATOR|CALIBRATOR), "[a-z]+\.[a-z_]+"/g)].length, calls, "every syscall in knowledge.mjs names its capability and acts as agentId, CURATOR or CALIBRATOR");
@@ -303,13 +303,15 @@ test("D6. the crons are exactly wrangler.jsonc's, and the schedule is every step
     assert.equal(schedulePeriodMs(a.schedule.cron), 24 * HOUR_MS, `${a.id}: daily`);
   }
   assert.notEqual(WRANGLER.vars?.KNOWLEDGE_COUNCIL, "off", "the council's schedule holds only while its session runs");
-  // The calibrator's trace: its run report goes out on the daily curation only, never on the carry runs.
+  // The curator's and the calibrator's trace: one run report each, on the daily curation only, never on the carry runs.
   assert.match(body, /await step\("curation", \(\) => runCuration\(env, \{ now, daily: true \}\)\)/);
   assert.match(body, /await step\("curation_carry", \(\) => runCuration\(env, \{ now \}\)\)/);
   const k = src["src/knowledge.mjs"];
-  const report = [...k.matchAll(/await publishCalibratorRun\(/g)].map((x) => enclosingFunction(k, x.index));
-  assert.deepEqual(report, ["runCuration"], "one calibrator run report, from runCuration");
-  assert.match(k, /const report = daily \? await publishCalibratorRun\(/, "only on the daily run");
+  for (const [fn, name] of [["publishCuratorRun", "curatorReport"], ["publishCalibratorRun", "calibratorReport"]]) {
+    const report = [...k.matchAll(new RegExp(`await ${fn}\\(`, "g"))].map((x) => enclosingFunction(k, x.index));
+    assert.deepEqual(report, ["runCuration"], `one ${fn} report, from runCuration`);
+    assert.match(k, new RegExp(`const ${name} = daily \\? await ${fn}\\(`), `${fn}: only on the daily run`);
+  }
 });
 
 test("D7. the entrypoints are exactly the Worker's exports and their methods", () => {
