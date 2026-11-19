@@ -37,11 +37,10 @@ const MAX_FACTS_BYTES = 16_384;
  */
 export const DOCTRINE_BOUNDS = Object.freeze({
   "decision.trading_mode": { kind: "text", in: ["scalp", "intraday", "swing"] },
-  "decision.quorum_min": { kind: "number", min: 0.45, max: 0.7 },
-  "decision.lean": { kind: "number", min: 0.05, max: 0.3 },
-  "decision.min_rrr": { kind: "number", min: 1, max: 3 },
   "decision.min_confidence": { kind: "number", min: 0.3, max: 0.7 },
-  // The Decision Engine's thresholds per trading mode (xauusd, owner 2026-11-19: "mau"), today's single bounds each.
+  // The Decision Engine's thresholds per trading mode (xauusd, owner 2026-11-19: "mau"), today's single bounds each. The
+  // single facts (decision.quorum_min, lean, min_rrr: the mode in force) are information now, unbounded as on the
+  // platform, so the council amends these only under the per-mode names.
   "decision.quorum_min_scalp": { kind: "number", min: 0.45, max: 0.7 },
   "decision.quorum_min_intraday": { kind: "number", min: 0.45, max: 0.7 },
   "decision.quorum_min_swing": { kind: "number", min: 0.45, max: 0.7 },
