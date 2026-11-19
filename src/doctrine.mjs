@@ -41,6 +41,8 @@ export const DOCTRINE_BOUNDS = Object.freeze({
   "decision.lean": { kind: "number", min: 0.05, max: 0.3 },
   "decision.min_rrr": { kind: "number", min: 1, max: 3 },
   "decision.min_confidence": { kind: "number", min: 0.3, max: 0.7 },
+  // The room guardrail in 1H average ranges (xauusd src/room-tuning.mjs, owner 2026-11-19: bounds 0.5 to 1.5).
+  "decision.room_min_atr": { kind: "number", min: 0.5, max: 1.5 },
   "decision.witness_weights": { kind: "weights", max_each: 0.3 },
   "rooms.quorum_share_default": { kind: "number", min: 0.5, max: 0.6 },
   "room.m15_unverified_confidence_cap": { kind: "number", min: 0.3, max: 0.5 },

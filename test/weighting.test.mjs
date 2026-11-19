@@ -187,3 +187,22 @@ test("the Decision Engine's witness-weighting report (timeframe engine) is check
   assert.equal((await latestWeightingReport(db, "engine")).report.rooms, 380);
   assert.equal((await latestWeightingReport(db)).report.rooms, 320, "the 1H row is untouched");
 });
+
+test("the Decision Engine's room-guardrail report (timeframe room, xauusd 2026-11-19) is checked: modes and the 0.5 to 1.5 bounds", async () => {
+  const { ROOM_REPORT_VERSION, roomValuesProblems } = await import("../src/weighting.mjs");
+  const room = {
+    version: ROOM_REPORT_VERSION, equation: "cryptophys.room-tuning.v1", generated_at: new Date(NOW).toISOString(), mode: "auto", timeframe: "room", window_days: 21, rooms: 343,
+    bounds: { min: 0.5, max: 1.5, step: 0.25, default: 1 },
+    active: { params: { scalp: 1, intraday: 1, swing: 1, range: 1 } },
+    agents: [], candidates: [{ id: "room:scalp:0.75", mode: "scalp", change: "scalp room down from 1 to 0.75 times the 1H average range", params: { scalp: 0.75 }, verdict: "collecting", discovery: { bars: 120 }, holdout: { bars: 100, complete: true, required_bars: 100 } }],
+    history: {}
+  };
+  assert.deepEqual(reportProblems(room), []);
+  assert.deepEqual(roomValuesProblems({ scalp: 0.5, swing: 1.5 }), []);
+  assert.match(roomValuesProblems({ scalp: 0.25 }).join(), /out_of_bounds:scalp/, "the floor keeps the guard on");
+  assert.match(roomValuesProblems({ weekly: 1 }).join(), /unknown_mode:weekly/);
+  assert.ok(reportProblems({ ...room, timeframe: "engine" }).includes("timeframe_invalid"));
+  assert.ok(reportProblems({ ...room, active: { params: { scalp: 2 } } }).includes("active_invalid"));
+  assert.ok(reportProblems({ ...room, candidates: [{ ...room.candidates[0], params: { scalp: 0.1 } }] }).includes("candidate_invalid"));
+  assert.ok(reportProblems({ ...room, candidates: [{ ...room.candidates[0], price: 4000 }] }).some((p) => p.startsWith("forbidden_key")));
+});

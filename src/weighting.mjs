@@ -97,13 +97,40 @@ function forbidden(value, path = "report") {
   return Object.entries(value).flatMap(([k, v]) => [...(FORBIDDEN_KEYS.includes(k) ? [`${path}.${k}`] : []), ...forbidden(v, `${path}.${k}`)]);
 }
 
+/**
+ * The Decision Engine's room guardrail per trading mode (owner 2026-11-19 in xauusd: "guardrail room biarkan protocol
+ * learning dan knowledge yang melakukan adjustment secara dinamis"; bounds 0.5 to 1.5 times the 1H average range).
+ * xauusd src/room-tuning.mjs activates or rolls back by itself; its report comes here under timeframe "room" for the
+ * audit. Aether proposes nothing from it; the value in force reaches the doctrine as the fact decision.room_min_atr.
+ */
+export const ROOM_REPORT_VERSION = "cryptophys.room-tuning-report.v1";
+export const ROOM_TIMEFRAME = "room";
+const ROOM_MODES = Object.freeze(["scalp", "intraday", "swing", "range"]);
+const ROOM_MIN = 0.5, ROOM_MAX = 1.5;
+
+/** Pure: why a room value set may not be stored (empty when every key is a trading mode and every value sits inside 0.5 to 1.5). */
+export function roomValuesProblems(p) {
+  if (!isObject(p) || !Object.keys(p).length) return ["not_an_object"];
+  const out = [];
+  for (const [k, v] of Object.entries(p)) {
+    if (!ROOM_MODES.includes(k)) out.push(`unknown_mode:${k}`);
+    else if (typeof v !== "number" || !Number.isFinite(v) || v < ROOM_MIN - 1e-9 || v > ROOM_MAX + 1e-9) out.push(`out_of_bounds:${k}`);
+  }
+  return out;
+}
+
 /** Pure: why a weighting report is refused (empty when it may be stored). */
 export function reportProblems(report) {
   if (!isObject(report)) return ["not_an_object"];
   const out = [];
   const witness = report.version === WITNESS_REPORT_VERSION;
-  if (report.version !== WEIGHTING_REPORT_VERSION && !witness) out.push("unsupported_version");
-  if (witness) {
+  const room = report.version === ROOM_REPORT_VERSION;
+  if (report.version !== WEIGHTING_REPORT_VERSION && !witness && !room) out.push("unsupported_version");
+  if (room) {
+    if (report.timeframe !== ROOM_TIMEFRAME) out.push("timeframe_invalid");
+    if (!isObject(report.active) || roomValuesProblems(report.active.params).length) out.push("active_invalid");
+    if (Array.isArray(report.candidates) && report.candidates.some((c) => !isObject(c) || roomValuesProblems(c.params).length)) out.push("candidate_invalid");
+  } else if (witness) {
     if (report.timeframe !== WITNESS_TIMEFRAME) out.push("timeframe_invalid");
     if (!isObject(report.active) || witnessWeightsProblems(report.active.params).length) out.push("active_invalid");
     if (Array.isArray(report.candidates) && report.candidates.some((c) => !isObject(c) || witnessWeightsProblems(c.params).length)) out.push("candidate_invalid");

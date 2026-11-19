@@ -165,8 +165,8 @@
     {
       "id": "engine_thresholds",
       "class": "operational",
-      "rule": "In the intraday mode the Decision Engine's BUY or SELL needs more than 50% of the witnesses' weight on its side, or a lean of at least 0.15 with more weight than the other side; no veto; a plan from the key levels paying at least 1.5R to its target; room to move, with the nearest key zones below and above price at least one 1H average range apart; and a confidence of at least 0.4. The trading mode (scalp, intraday or swing) sets these thresholds. In the scalp mode the target is the nearest key level ahead, with no reward-to-risk minimum.",
-      "template": "In the {decision.trading_mode} mode the Decision Engine's BUY or SELL needs more than {decision.quorum_min} of the witnesses' weight on its side, or a lean of at least {decision.lean} with more weight than the other side; no veto; a plan from the key levels paying at least {decision.min_rrr}R to its target; room to move, with the nearest key zones below and above price at least one 1H average range apart; and a confidence of at least {decision.min_confidence}. The trading mode (scalp, intraday or swing) sets these thresholds. In the scalp mode the target is the nearest key level ahead, with no reward-to-risk minimum.",
+      "rule": "In the intraday mode the Decision Engine's BUY or SELL needs more than 50% of the witnesses' weight on its side, or a lean of at least 0.15 with more weight than the other side; no veto; a plan from the key levels paying at least 1.5R to its target; room to move, with the nearest key zones below and above price at least 1 times the 1H average range apart (the trading mode's value, which the learning protocol moves between 0.5 and 1.5); and a confidence of at least 0.4. The trading mode (scalp, intraday or swing) sets these thresholds. In the scalp mode the target is the nearest key level ahead, with no reward-to-risk minimum.",
+      "template": "In the {decision.trading_mode} mode the Decision Engine's BUY or SELL needs more than {decision.quorum_min} of the witnesses' weight on its side, or a lean of at least {decision.lean} with more weight than the other side; no veto; a plan from the key levels paying at least {decision.min_rrr}R to its target; room to move, with the nearest key zones below and above price at least {decision.room_min_atr} times the 1H average range apart (the trading mode's value, which the learning protocol moves between 0.5 and 1.5); and a confidence of at least {decision.min_confidence}. The trading mode (scalp, intraday or swing) sets these thresholds. In the scalp mode the target is the nearest key level ahead, with no reward-to-risk minimum.",
       "anchors": [
         {
           "fact": "decision.trading_mode",
@@ -192,11 +192,16 @@
           "fact": "decision.min_confidence",
           "value": 0.4,
           "format": "num"
+        },
+        {
+          "fact": "decision.room_min_atr",
+          "value": 1,
+          "format": "num"
         }
       ],
-      "source": "xauusd src/decision-engine.mjs guardrailsFor and decide; owner decision 2026-11-10 (trading modes); 2026-11-13: room to move (the squeeze guardrail, owner)",
+      "source": "xauusd src/decision-engine.mjs guardrailsFor and decide; owner decision 2026-11-10 (trading modes); 2026-11-13: room to move (the squeeze guardrail, owner); 2026-11-19: the room per trading mode, moved by the learning protocol inside 0.5 to 1.5 times the 1H average range (xauusd src/room-tuning.mjs; owner: \"guardrail room biarkan protocol learning dan knowledge yang melakukan adjustment secara dinamis\", then \"sesuai rekomendasimu\")",
       "since": "2026-11-11",
-      "updated": "2026-11-13"
+      "updated": "2026-11-19"
     },
     {
       "id": "confirmation_required",
