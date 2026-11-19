@@ -74,18 +74,18 @@ test("in sync: the council proposes nothing when the system matches the doctrine
 });
 
 test("a drift measured twice from the same version, inside its bound: every seat agrees and a routine amendment is proposed", () => {
-  const changed = { "decision.quorum_min": 0.55, "decision.min_rrr": 1.2 };
+  const changed = { "decision.quorum_min_intraday": 0.55, "decision.min_rrr_intraday": 1.2 };
   const review = councilReview({ rules: asRules(), latest: seatsOf(report(NOW, { nexus: changed })), previous: seatsOf(report(NOW - H, { nexus: changed })), session: "kc_20261112-0352" });
   const item = review.find((r) => r.rule === "engine_thresholds");
   assert.equal(item.status, "propose");
   assert.equal(item.action, "amend_doctrine");
   assert.deepEqual(item.seats, { aether: "agree", nexus: "agree" });
   assert.deepEqual(item.proposal.params.values, changed);
-  assert.deepEqual(item.proposal.params.previous, { "decision.quorum_min": 0.5, "decision.min_rrr": 1.5 });
+  assert.deepEqual(item.proposal.params.previous, { "decision.quorum_min_intraday": 0.5, "decision.min_rrr_intraday": 1.5 });
   assert.equal(item.proposal.target, "engine-thresholds");
   assert.equal(item.proposal.params.canon, canonShort());
-  assert.match(item.text, /more than 55% of the witnesses' weight/);
-  assert.match(item.text, /at least 1\.2R/);
+  assert.match(item.text, /intraday 55%/);
+  assert.match(item.text, /intraday 1\.2R/);
   assert.ok(JSON.stringify(item.proposal).length < 2000, "fits the kernel's params limit");
 });
 
@@ -103,7 +103,7 @@ test("measured once, or changed between the reports: the seat keeps observing; t
 });
 
 test("out of bounds: the Aether seat refuses; a constitutional or unbounded fact goes to the owner as amend_constitution", () => {
-  const wild = { "decision.quorum_min": 0.9 };
+  const wild = { "decision.quorum_min_intraday": 0.9 };
   const refused = councilReview({ rules: asRules(), latest: seatsOf(report(NOW, { nexus: wild })), previous: seatsOf(report(NOW - H, { nexus: wild })), session: "kc_x-1" }).find((r) => r.rule === "engine_thresholds");
   assert.equal(refused.status, "refused");
   assert.match(refused.reasons.join(" "), /outside 0.45-0.7/);
@@ -118,9 +118,9 @@ test("out of bounds: the Aether seat refuses; a constitutional or unbounded fact
 
 test("a fact the system stopped reporting is unreported: an owner PR, never an amendment", () => {
   const r = report(NOW);
-  delete r.seats.nexus.facts["decision.lean"];
+  delete r.seats.nexus.facts["decision.lean_intraday"];
   const p = report(NOW - H);
-  delete p.seats.nexus.facts["decision.lean"];
+  delete p.seats.nexus.facts["decision.lean_intraday"];
   const item = councilReview({ rules: asRules(), latest: seatsOf(r), previous: seatsOf(p), session: "kc_x-1" }).find((x) => x.rule === "engine_thresholds");
   assert.equal(item.status, "unreported");
   assert.equal(item.proposal, undefined);
@@ -129,7 +129,7 @@ test("a fact the system stopped reporting is unreported: an owner PR, never an a
 test("runCouncil: proposes to Cerebrum, applies only what Cerebrum executed, re-renders the rule and changes the index hash", async () => {
   resetDoctrineSchemaCacheForTests();
   const db = d1();
-  const changed = { "decision.quorum_min": 0.55 };
+  const changed = { "decision.quorum_min_intraday": 0.55 };
   await storeFacts(db, report(NOW - 2 * H, { nexus: changed }), { now: NOW - 2 * H });
   await storeFacts(db, report(NOW - 10 * 60_000, { nexus: changed }), { now: NOW - 10 * 60_000 });
   const k = kernel({ execute: true });
@@ -146,7 +146,7 @@ test("runCouncil: proposes to Cerebrum, applies only what Cerebrum executed, re-
   assert.equal(s.applied, 0);
   const view = await doctrineView(env, { now: NOW + H });
   const rule = view.rules.find((x) => x.id === "engine_thresholds");
-  assert.match(rule.rule, /more than 55% of the witnesses' weight/);
+  assert.match(rule.rule, /intraday 55%/);
   assert.equal(rule.amended.action, "amend_doctrine");
   assert.equal(view.council.last_session.proposals[0].status, "executed");
   assert.notEqual(await effectiveSha(db), CANON.content_sha256, "the index re-embeds the doctrine in force");
@@ -163,7 +163,7 @@ test("runCouncil: proposes to Cerebrum, applies only what Cerebrum executed, re-
 test("observe mode records the review and proposes nothing; a denial ends the session; an amendment against another canon is not applied", async () => {
   resetDoctrineSchemaCacheForTests();
   const db = d1();
-  const changed = { "decision.quorum_min": 0.55, "decision.lean": 0.1 };
+  const changed = { "decision.quorum_min_intraday": 0.55, "decision.lean_intraday": 0.1 };
   const omega = { "omega.max_spread_points": 80 };
   const weighting = { "weighting.activation_min_days": 14 };
   await storeFacts(db, report(NOW - 2 * H, { nexus: { ...changed, ...weighting }, omega }), { now: NOW - 2 * H });
@@ -178,8 +178,8 @@ test("observe mode records the review and proposes nothing; a denial ends the se
   assert.equal(d.proposals.length, 1, "a denial is final for the session");
   assert.ok(MAX_PROPOSALS_PER_SESSION >= 3);
   assert.equal((await runCouncil({ AETHER_DB: db, KNOWLEDGE_COUNCIL: "off" }, { now: NOW })).status, "off");
-  const foreign = effectiveDoctrine([{ amendment_id: "cns_x", rule: "engine_thresholds", action: "amend_doctrine", values: { "decision.quorum_min": 0.6 }, canon: "000000000000", executed_at: "2026-11-12T00:00:00Z" }]);
-  assert.match(foreign.find((r) => r.id === "engine_thresholds").rule, /more than 50%/, "an amendment made against another canon is folded in by the canon PR, not applied");
+  const foreign = effectiveDoctrine([{ amendment_id: "cns_x", rule: "engine_thresholds", action: "amend_doctrine", values: { "decision.quorum_min_intraday": 0.6 }, canon: "000000000000", executed_at: "2026-11-12T00:00:00Z" }]);
+  assert.match(foreign.find((r) => r.id === "engine_thresholds").rule, /intraday 50%/, "an amendment made against another canon is folded in by the canon PR, not applied");
 });
 
 test("the template renderer keeps unknown tokens and formats each kind", () => {
