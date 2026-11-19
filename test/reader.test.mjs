@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { aetherOverview, weightingSummary } from "../src/reader.mjs";
+import { aetherOverview, weightingSummary, historyList } from "../src/reader.mjs";
 import { ingestCards, resetSchemaCacheForTests } from "../src/store.mjs";
 import { resetKnowledgeSchemaCacheForTests } from "../src/knowledge.mjs";
-import { resetWeightingSchemaCacheForTests } from "../src/weighting.mjs";
+import { resetWeightingSchemaCacheForTests, storeWeightingReport } from "../src/weighting.mjs";
 import { CANON } from "../src/canon.generated.mjs";
 
 function d1() {
@@ -161,4 +161,41 @@ test("weighting progress: the most-paired candidate's discovery and holdout agai
   assert.deepEqual(p.verdicts, { collecting: 2 });
   assert.equal(p.rooms, 59);
   assert.equal(weightingProgress("15", null).discovery, null);
+});
+
+// 2026-11-19: the room guardrail report (xauusd src/room-tuning.mjs roomTuningReport, timeframe "room") sends its
+// history per trading mode; `.slice` on that object threw and took every panel of the Console's Learning page down.
+const ROOM_REPORT = {
+  version: "cryptophys.room-tuning-report.v1", equation: "room-tuning.v1", generated_at: "2026-11-09T11:13:00Z", mode: "auto", timeframe: "room",
+  window_days: 30, rooms: 337, bounds: { min: 0.5, max: 1.5, step: 0.25, default: 1 },
+  active: { params: { scalp: 1, intraday: 1, swing: 1, range: 1 } },
+  modes: { scalp: { active: 1, decisions: 337, scored: 321, accuracy: 0.52, entries_taken: 40, fidelity: 0.99, reverse: null }, intraday: null, swing: null, range: null },
+  agents: [], holm: { m: 8 },
+  candidates: [{ id: "room:scalp:1.25", mode: "scalp", change: "+0.25", params: { scalp: 1.25 }, verdict: "not_better", same_rooms: 300, differing_decisions: 21, discovery: { bars: 210, p_holm: 0.8 }, holdout: null }],
+  history: { scalp: [{ kind: "activated", from: 1, value: 1.25, at: "2026-11-08T10:00:00Z" }, { kind: "rolled_back", from: 1.25, value: 1, at: "2026-11-09T09:00:00Z" }], intraday: [], swing: [{ kind: "activated", from: 1, value: 0.75, at: "2026-11-08T12:00:00Z" }], range: [] }
+};
+
+test("the room guardrail report is read: its per-mode history, its modes and bounds, and every panel still serves", async () => {
+  const s = weightingSummary("room", ROOM_REPORT, "2026-11-09T11:13:05Z");
+  assert.equal(s.kind, "room_guardrail");
+  assert.deepEqual(s.bounds, ROOM_REPORT.bounds);
+  assert.equal(s.modes.scalp.fidelity, 0.99);
+  assert.deepEqual(s.history.map((h) => [h.mode, h.kind, h.value]), [["scalp", "rolled_back", 1], ["swing", "activated", 0.75], ["scalp", "activated", 1.25]], "latest first, each with its mode");
+  assert.equal(s.candidates[0].id, "room:scalp:1.25");
+  assert.deepEqual(historyList([{ kind: "x" }, null, 3]), [{ kind: "x" }]);
+  assert.deepEqual(historyList("bad"), []);
+  assert.deepEqual(weightingSummary("60", { history: { a: "not a list" }, candidates: "nope", agents: 7 }).history, []);
+
+  // In the overview, beside a normal report: both summaries, and the sync and progress panels still answer.
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests(); resetWeightingSchemaCacheForTests();
+  const db = d1();
+  await storeWeightingReport(db, { ...ROOM_REPORT }, { now: NOW });
+  await storeWeightingReport(db, { version: "cryptophys.weighting-report.v1", timeframe: "60", generated_at: "2026-11-09T11:00:00Z", mode: "auto", rooms: 10, candidates: [], agents: [], history: [] }, { now: NOW });
+  const o = await aetherOverview({ AETHER_DB: db }, { now: NOW });
+  const tfs = o.weighting.map((w) => w.timeframe).sort();
+  assert.ok(tfs.includes("room"), JSON.stringify(o.weighting));
+  assert.equal(o.weighting.find((w) => w.timeframe === "room").kind, "room_guardrail");
+  assert.ok(o.weighting.every((w) => !w.error));
+  assert.ok(o.sync.checks);
+  assert.equal(o.progress.weighting.find((w) => w.timeframe === "room").candidates, 1);
 });

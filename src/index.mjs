@@ -31,7 +31,7 @@ import { runCuration, curationCarried, syncReviews, learnedPack, knowledgeCounts
 import { storeWeightingReport, weightingReports } from "./weighting.mjs";
 import { storeExecutionReport } from "./execution.mjs";
 import { storeModelReport } from "./model.mjs";
-import { aetherOverview, aetherSync } from "./reader.mjs";
+import { aetherOverview, aetherSync, historyList } from "./reader.mjs";
 import { storeFacts, syncAmendments, runCouncil, COUNCIL_HOUR_UTC, omegaPolicy } from "./doctrine.mjs";
 
 const json = (body, status = 200) => new Response(JSON.stringify(body, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -93,7 +93,7 @@ export default {
       let weighting = null;
       try {
         const all = env.AETHER_DB ? await weightingReports(env.AETHER_DB) : [];
-        weighting = all.length ? Object.fromEntries(all.map((w) => [w.timeframe, { received_at: w.received_at, mode: w.report.mode ?? null, active: w.report.active?.id ?? null, rooms: w.report.rooms ?? 0, regimes: w.report.regimes ?? null, better: (w.report.candidates || []).filter((c) => String(c.verdict).startsWith("better_than_active")).map((c) => c.id), last_change: (w.report.history || []).filter((h) => h.kind === "activated" || h.kind === "rolled_back").at(-1) ?? null }])) : null;
+        weighting = all.length ? Object.fromEntries(all.map((w) => [w.timeframe, { received_at: w.received_at, mode: w.report.mode ?? null, active: w.report.active?.id ?? null, rooms: w.report.rooms ?? 0, regimes: w.report.regimes ?? null, better: (Array.isArray(w.report?.candidates) ? w.report.candidates : []).filter((c) => String(c.verdict).startsWith("better_than_active")).map((c) => c.id), last_change: historyList(w.report?.history).filter((h) => h.kind === "activated" || h.kind === "rolled_back").at(-1) ?? null }])) : null;
       } catch { weighting = { error: "unavailable" }; }
       return json({ service: "cryptophys-aether", status: "ok", phase: env.AETHER_PHASE ?? "A6", canon: { version: CANON.version, content_sha256: CANON.content_sha256 }, cards, indexes, ai, knowledge, weighting });
     }
