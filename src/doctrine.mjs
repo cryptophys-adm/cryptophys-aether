@@ -41,6 +41,18 @@ export const DOCTRINE_BOUNDS = Object.freeze({
   "decision.lean": { kind: "number", min: 0.05, max: 0.3 },
   "decision.min_rrr": { kind: "number", min: 1, max: 3 },
   "decision.min_confidence": { kind: "number", min: 0.3, max: 0.7 },
+  // The Decision Engine's thresholds per trading mode (xauusd, owner 2026-11-19: "mau"), today's single bounds each.
+  "decision.quorum_min_scalp": { kind: "number", min: 0.45, max: 0.7 },
+  "decision.quorum_min_intraday": { kind: "number", min: 0.45, max: 0.7 },
+  "decision.quorum_min_swing": { kind: "number", min: 0.45, max: 0.7 },
+  "decision.quorum_min_range": { kind: "number", min: 0.45, max: 0.7 },
+  "decision.lean_scalp": { kind: "number", min: 0.05, max: 0.3 },
+  "decision.lean_intraday": { kind: "number", min: 0.05, max: 0.3 },
+  "decision.lean_swing": { kind: "number", min: 0.05, max: 0.3 },
+  "decision.lean_range": { kind: "number", min: 0.05, max: 0.3 },
+  "decision.min_rrr_intraday": { kind: "number", min: 1, max: 3 },
+  "decision.min_rrr_swing": { kind: "number", min: 1, max: 3 },
+  "decision.min_rrr_range": { kind: "number", min: 1, max: 3 },
   // The room guardrail in 1H average ranges, one fact per trading mode so a mode switch alone is no drift (xauusd
   // src/room-tuning.mjs, owner 2026-11-19: bounds 0.5 to 1.5).
   "decision.room_min_atr_scalp": { kind: "number", min: 0.5, max: 1.5 },
