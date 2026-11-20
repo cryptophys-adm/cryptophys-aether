@@ -5,6 +5,7 @@ import { aetherOverview, weightingSummary, historyList } from "../src/reader.mjs
 import { ingestCards, resetSchemaCacheForTests } from "../src/store.mjs";
 import { resetKnowledgeSchemaCacheForTests } from "../src/knowledge.mjs";
 import { resetWeightingSchemaCacheForTests, storeWeightingReport } from "../src/weighting.mjs";
+import { storeLensReport, resetLensSchemaCacheForTests } from "../src/lens.mjs";
 import { CANON } from "../src/canon.generated.mjs";
 
 function d1() {
@@ -42,6 +43,7 @@ test("the overview reads an empty database and carries the canon", async () => {
   assert.deepEqual(o.weighting, []);
   assert.equal(o.guardian.cards, 0);
   assert.deepEqual(o.knowledge.items, []);
+  assert.equal(o.lens, null, "no lens report yet");
   const none = await aetherOverview({}, { now: NOW });
   assert.equal(none.cards, null, "no database: still an answer");
 });
@@ -198,4 +200,23 @@ test("the room guardrail report is read: its per-mode history, its modes and bou
   assert.ok(o.weighting.every((w) => !w.error));
   assert.ok(o.sync.checks);
   assert.equal(o.progress.weighting.find((w) => w.timeframe === "room").candidates, 1);
+});
+
+
+test("the overview exposes the latest accepted Positioning & Liquidity report", async () => {
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests(); resetWeightingSchemaCacheForTests(); resetLensSchemaCacheForTests();
+  const db = d1();
+  const report = {
+    schema: "cryptophys.lens-report.v1",
+    generated_at: "2026-11-20T11:00:00.000Z",
+    doctrine_sha: "a".repeat(64),
+    lenses: Object.fromEntries(["positioning", "liquidity"].map((name) => [name, {
+      enabled: true, floored: false,
+      weights: Object.fromEntries(["scalp", "intraday", "swing", "range"].map((mode) => [mode, { weight: 0.2, source: "anchor" }]))
+    }]))
+  };
+  await storeLensReport(db, report, { now: Date.parse("2026-11-20T11:00:05Z") });
+  const overview = await aetherOverview({ AETHER_DB: db }, { now: NOW });
+  assert.equal(overview.lens.report.generated_at, report.generated_at);
+  assert.equal(overview.lens.received_at, "2026-11-20T11:00:05.000Z");
 });

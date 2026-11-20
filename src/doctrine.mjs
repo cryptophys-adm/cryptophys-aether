@@ -35,6 +35,28 @@ const MAX_FACTS_BYTES = 16_384;
  * control-plane-shared/src/doctrine.ts (DOCTRINE_BOUNDS): the Aether seat refuses what Cerebrum would.
  * A change there is a platform PR; a change here alone never widens anything Cerebrum executes.
  */
+const LENS_MODES = Object.freeze(["scalp", "intraday", "swing", "range"]);
+const perMode = (base, kind, bounds) => Object.fromEntries(LENS_MODES.map((m, i) => [`${base}_${m}`, { kind, min: bounds[i][0], max: bounds[i][1] }]));
+const same = (lo, hi) => [[lo, hi], [lo, hi], [lo, hi], [lo, hi]];
+/** The lens knobs' hard bounds, per mode in the order scalp, intraday, swing, range. */
+export const LENS_BOUNDS = Object.freeze({
+  ...perMode("positioning.de_weight", "number", [[0.02, 0.04], [0.02, 0.06], [0.02, 0.1], [0.02, 0.05]]),
+  ...perMode("positioning.crowd_pctl", "number", same(0.8, 0.95)),
+  ...perMode("positioning.flow_z", "number", same(0.5, 2)),
+  ...perMode("liquidity.council_weight", "number", [[0, 0.8], [0, 0.6], [0, 0.4], [0, 0.6]]),
+  ...perMode("liquidity.spike_pctl", "number", same(0.9, 0.99)),
+  ...perMode("liquidity.thin_pctl", "number", same(0.05, 0.3)),
+  ...perMode("liquidity.spread_widen", "number", same(1.5, 4)),
+  ...perMode("liquidity.sweep_lookback_min", "integer", [[30, 120], [60, 360], [240, 1440], [60, 360]]),
+  ...perMode("liquidity.pool_tol_atr", "number", same(0.02, 0.15)),
+  ...perMode("liquidity.hvn_pctl", "number", same(0.8, 0.95)),
+  ...perMode("liquidity.profile_window_min", "integer", [[120, 480], [480, 2880], [2880, 14400], [480, 2880]]),
+  "positioning.score_floor": { kind: "number", min: 0.4, max: 0.5 },
+  "positioning.score_window": { kind: "integer", min: 40, max: 200 },
+  "liquidity.score_floor": { kind: "number", min: 0.4, max: 0.5 },
+  "liquidity.score_window": { kind: "integer", min: 50, max: 300 }
+});
+
 export const DOCTRINE_BOUNDS = Object.freeze({
   "decision.trading_mode": { kind: "text", in: ["scalp", "intraday", "swing"] },
   "decision.min_confidence": { kind: "number", min: 0.3, max: 0.7 },
@@ -69,7 +91,10 @@ export const DOCTRINE_BOUNDS = Object.freeze({
   "omega.max_spread_points": { kind: "integer", min: 20, max: 100 },
   "omega.max_positions": { kind: "integer", min: 1, max: 3 },
   "omega.max_daily_loss_pct": { kind: "number", min: 1, max: 5 },
-  "omega.risk_pct": { kind: "number", min: 0.1, max: 2 }
+  "omega.risk_pct": { kind: "number", min: 0.1, max: 2 },
+  // The Positioning & Liquidity analyst's knobs (xauusd docs/RFC_POSITIONING_LIQUIDITY.md §8, owner breakglass
+  // 2026-11-20): 44 per-mode facts and 4 score facts, the platform's bounds (canonical main a879288).
+  ...LENS_BOUNDS
 });
 
 const WITNESS_WORD = Object.freeze({
@@ -453,4 +478,32 @@ export async function omegaPolicy(env) {
   try { applied = db ? await appliedAmendments(db) : []; } catch { applied = []; }
   const { values, amended } = omegaPolicyOf(effectiveDoctrine(applied));
   return { version: OMEGA_POLICY_VERSION, doctrine_sha: await effectiveSha(db).catch(() => CANON.content_sha256), values, amended, advisory: "Applied by Omega only when its owner's switch is on, within its own hard bounds." };
+}
+
+// ---------------------------------------------------------------- the Positioning & Liquidity analyst's knobs
+// xauusd docs/RFC_POSITIONING_LIQUIDITY.md §7.1: KnowledgeIngress.lensPolicy(), read by the hourly pull beside
+// omegaPolicy(). The values are the doctrine in force (the canon rule lens_positioning_liquidity plus the amendments
+// Cerebrum executed), each inside its hard bound, else left out; xauusd clamps again and falls back to its anchor.
+export const LENS_POLICY_VERSION = "cryptophys.lens-policy.v1";
+
+/** Pure: the lens knobs from the doctrine in force, by their flat fact names; each within its bound, else left out. */
+export function lensPolicyOf(rules) {
+  const values = {}, amended = {};
+  for (const r of rules || []) {
+    for (const a of r.anchors || []) {
+      if (!Object.hasOwn(LENS_BOUNDS, a.fact) || boundProblem(a.fact, a.value)) continue;
+      values[a.fact] = a.value;
+      if (r.amended && !sameValue(a.value, a.canon_value)) amended[a.fact] = { from: a.canon_value, amendment_id: r.amended.amendment_id, executed_at: r.amended.executed_at };
+    }
+  }
+  return { values, amended };
+}
+
+/** The pack xauusd pulls for the lens knobs: the values in force, the doctrine's sha and the amendments behind them. */
+export async function lensPolicy(env) {
+  const db = env?.AETHER_DB;
+  let applied = [];
+  try { applied = db ? await appliedAmendments(db) : []; } catch { applied = []; }
+  const { values, amended } = lensPolicyOf(effectiveDoctrine(applied));
+  return { version: LENS_POLICY_VERSION, doctrine_sha: await effectiveSha(db).catch(() => CANON.content_sha256), values, amended, advisory: "Read by the Positioning & Liquidity analyst within its own hard bounds; the owner's switches turn a lens off." };
 }
