@@ -51,7 +51,7 @@ test("E1. a report carries R, times and exits only; a price, a level, a size or 
   assert.ok(executionReportProblems(report([{ ...LONDON[0], entry: 4012.5 }])).some((p) => p.startsWith("trade_invalid") || p.startsWith("forbidden_key")));
   assert.ok(executionReportProblems({ ...report(LONDON), modes: { scalp: { tp1: 4000 } } }).includes("forbidden_key:report.modes.scalp.tp1"));
   assert.deepEqual(executionReportProblems(report([{ ...LONDON[0], omega_r: 4012.5 }])), ["trade_invalid:0"], "an R of 4012.5 is a price");
-  assert.deepEqual(executionReportProblems(report([{ ...LONDON[0], mode: "hft" }])), ["trade_invalid:0"]);
+  assert.deepEqual(executionReportProblems(report([{ ...LONDON[0], mode: "HFT-1" }])), ["trade_invalid:0"], "a malformed mode name (any well-formed one passes, EX-modes)");
   assert.deepEqual(executionReportProblems(report([{ ...LONDON[0], chart: "60" }])), ["trade_invalid:0"]);
 });
 
@@ -122,4 +122,20 @@ test("EX-range: a report with the range mode and an extra top-level limit block 
   };
   assert.deepEqual(executionReportProblems(report), []);
   assert.deepEqual(executionReportProblems({ ...report, limit: { by_mode: { range: { entry: 1 } } } }), ["forbidden_key:report.limit.by_mode.range.entry"], "a price key inside the limit block is still refused");
+});
+
+test("EX-modes: a new mode and digit exit codes are accepted; malformed ones are refused; the curator reads the report's own modes", async () => {
+  const { executionReportProblems, executionCandidates } = await import("../src/execution.mjs");
+  const base = { schema: "cryptophys.execution-report.v1", generated_at: "2026-11-20T05:00:00.000Z", window_days: 30 };
+  const t = (i, mode, omega_r, plan_r) => ({ chart: "15", bar_open: new Date(Date.parse("2026-11-19T08:00:00.000Z") + i * 900_000).toISOString(), session: "london", mode, side: "BUY", plan_r, plan_exit: "target", omega_r, omega_exit: "pm_tp2_target", omega_size: 1 });
+  const ok = { ...base, modes: { breakout: {} }, trades: [t(0, "breakout", 1, 1)] };
+  assert.deepEqual(executionReportProblems(ok), [], "an unknown but well-formed mode and an exit code with digits pass");
+  assert.deepEqual(executionReportProblems({ ...ok, modes: { "Range-1": {} } }), ["modes_invalid"]);
+  assert.deepEqual(executionReportProblems({ ...ok, trades: [{ ...ok.trades[0], mode: "x".repeat(17) }] }), ["trade_invalid:0"]);
+  assert.deepEqual(executionReportProblems({ ...ok, trades: [{ ...ok.trades[0], omega_exit: "Bad-Exit" }] }), ["trade_invalid:0"]);
+  assert.deepEqual(executionReportProblems({ ...ok, trades: [{ ...ok.trades[0], omega_exit: "a".repeat(33) }] }), ["trade_invalid:0"]);
+  // Omega loses every one of 30 breakout signals the plan wins: the curator finds them although breakout is not a known mode.
+  const report = { ...base, modes: { breakout: {} }, trades: Array.from({ length: 30 }, (_, i) => t(i, "breakout", -1, 1)) };
+  const ids = executionCandidates(report, { now: Date.parse("2026-11-20T05:00:00.000Z"), cardIdsFor: (iso) => [`card-${iso}`] }).map((c) => c.item_id);
+  assert.ok(ids.includes("k-exec-plan-breakout-london"), ids.join(","));
 });

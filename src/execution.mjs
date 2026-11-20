@@ -16,15 +16,19 @@
 import { baseItem, binomialTail, CAUTION } from "./knowledge.mjs";
 
 export const EXECUTION_REPORT_SCHEMA = "cryptophys.execution-report.v1";
-// range: the fourth trading mode (xauusd 2026-11-18); without it every report since then was refused (modes_invalid).
+// The modes xauusd runs today (range is the fourth, 2026-11-18). The validator does not hold the report to this list: a
+// mode is any short lower-case name (MODE), and the curator reads the modes the report itself carries, so a fifth mode in
+// xauusd cannot silently refuse every report again, as range did from 18 Nov (orchestrator review of #38).
 export const EXECUTION_MODES = Object.freeze(["scalp", "intraday", "swing", "range"]);
+const MODE = /^[a-z][a-z_]{0,15}$/;
 export const EXECUTION_AGENT = "omega";
 const SESSIONS = Object.freeze(["asia", "london", "new_york", "late"]);
 const SESSION_WORD = Object.freeze({ asia: "Asia", london: "London", new_york: "New York", late: "late" });
 const MAX_TRADES = 500;
 const MAX_REPORT_BYTES = 256 * 1024;
 const TRADE_KEYS = Object.freeze(["chart", "bar_open", "session", "mode", "side", "plan_r", "plan_exit", "omega_r", "omega_exit", "omega_size"]);
-const EXIT = /^[a-z_]{1,24}$/;
+// Exit codes: lower case, digits and underscores (v4 and Position Manager codes such as pm_tp2 reach the trades list).
+const EXIT = /^[a-z0-9_]{1,32}$/;
 const FORBIDDEN = new Set(["entry", "entry_price", "stop", "stop_loss", "take_profit", "tp", "tp1", "tp2", "price", "prices", "exit_price", "level", "levels", "key_levels", "zones", "lots", "volume", "size_lots", "balance", "equity", "profit", "money"]);
 const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 const isR = (v) => v === null || (typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 50);
@@ -42,11 +46,11 @@ export function executionReportProblems(report) {
   if (report.schema !== EXECUTION_REPORT_SCHEMA) out.push("unsupported_schema");
   if (!Number.isFinite(Date.parse(report.generated_at))) out.push("generated_at_invalid");
   if (!Number.isInteger(report.window_days) || report.window_days < 1 || report.window_days > 90) out.push("window_days_invalid");
-  if (!isObject(report.modes) || Object.keys(report.modes).some((m) => !EXECUTION_MODES.includes(m))) out.push("modes_invalid");
+  if (!isObject(report.modes) || Object.keys(report.modes).some((m) => !MODE.test(m))) out.push("modes_invalid");
   if (!Array.isArray(report.trades) || report.trades.length > MAX_TRADES) out.push("trades_invalid");
   else {
     const bad = report.trades.findIndex((t) => !isObject(t) || Object.keys(t).some((k) => !TRADE_KEYS.includes(k)) || t.chart !== "15" || !Number.isFinite(Date.parse(t.bar_open))
-      || !SESSIONS.includes(t.session) || !EXECUTION_MODES.includes(t.mode) || (t.side !== "BUY" && t.side !== "SELL")
+      || !SESSIONS.includes(t.session) || typeof t.mode !== "string" || !MODE.test(t.mode) || (t.side !== "BUY" && t.side !== "SELL")
       || !isR(t.plan_r) || !isR(t.omega_r) || !(t.omega_size === null || (typeof t.omega_size === "number" && t.omega_size >= 0 && t.omega_size <= 1))
       || ![t.plan_exit, t.omega_exit].every((e) => e === null || (typeof e === "string" && EXIT.test(e))));
     if (bad >= 0) out.push(`trade_invalid:${bad}`);
@@ -129,7 +133,8 @@ export function executionCandidates(report, { now = Date.now(), cardIdsFor = () 
   const cites = (list) => list.flatMap((t) => cardIdsFor(t.bar_open));
   const pctText = (p) => (p >= 100 ? "every one" : `${p}%`);
   const out = [];
-  for (const mode of EXECUTION_MODES) {
+  const modes = [...new Set([...Object.keys(report.modes), ...trades.map((t) => t.mode)])].sort();
+  for (const mode of modes) {
     const inMode = trades.filter((t) => t.mode === mode);
     for (const session of SESSIONS) {
       // Omega against the plan, on the same signals of this mode and session.
