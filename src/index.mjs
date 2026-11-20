@@ -12,7 +12,8 @@
 //     weighting item activates the H1 quorum weighting in xauusd, owner decision 2026-11-09),
 //     ingestWeightingReport (the H1 quorum replay, src/weighting.mjs), ingestExecutionReport (the Signal
 //     Ledger's plan and Omega policy per trading mode, src/execution.mjs), ingestModelReport (xauusd's
-//     self-trained baseline model, src/model.mjs)
+//     self-trained baseline model, src/model.mjs), lensPolicy and ingestLensReport (the Positioning & Liquidity
+//     analyst's knobs from the doctrine in force and its daily lens report, src/doctrine.mjs, src/lens.mjs)
 //   cron :52 every hour (phase A4): canon sync into aether-canon (once per canon version), card
 //   embedding into aether-market, the review status of open knowledge proposals; at 01:52 UTC the
 //   guardian and auditor digest to the kernel; at 02:52 UTC the curator and calibrator propose (A6), and
@@ -32,7 +33,8 @@ import { storeWeightingReport, weightingReports } from "./weighting.mjs";
 import { storeExecutionReport } from "./execution.mjs";
 import { storeModelReport } from "./model.mjs";
 import { aetherOverview, aetherSync, historyList } from "./reader.mjs";
-import { storeFacts, syncAmendments, runCouncil, COUNCIL_HOUR_UTC, omegaPolicy } from "./doctrine.mjs";
+import { storeFacts, syncAmendments, runCouncil, COUNCIL_HOUR_UTC, omegaPolicy, lensPolicy } from "./doctrine.mjs";
+import { storeLensReport } from "./lens.mjs";
 
 const json = (body, status = 200) => new Response(JSON.stringify(body, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const canonInfo = () => ({ version: CANON.version, content_sha256: CANON.content_sha256, files: CANON.files, kb_version: CANON.indicator.kb_version, kb_content_sha256: CANON.indicator.kb_content_sha256 });
@@ -53,6 +55,10 @@ export class KnowledgeIngress extends WorkerEntrypoint {
   async ingestExecutionReport(report) { return storeExecutionReport(this.env.AETHER_DB, report); }
   // xauusd's self-trained baseline model (owner 2026-11-13): its scores and features, never a price.
   async ingestModelReport(report) { return storeModelReport(this.env.AETHER_DB, report); }
+  // The Positioning & Liquidity analyst (xauusd, owner breakglass 2026-11-20): its knobs from the doctrine in force,
+  // pulled hourly beside omegaPolicy, and its daily lens report (weights, scores, floors; never a price).
+  async lensPolicy() { return lensPolicy(this.env); }
+  async ingestLensReport(report) { return storeLensReport(this.env.AETHER_DB, report); }
 }
 
 /**
