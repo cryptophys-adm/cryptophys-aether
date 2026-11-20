@@ -110,3 +110,16 @@ test("E4. ingest, the overview and the daily curation: the report is kept, summa
   assert.equal(overview.execution.trades, 40);
   assert.equal(overview.execution.modes.scalp.signals, 40);
 });
+
+test("EX-range: a report with the range mode and an extra top-level limit block is accepted (xauusd 2026-11-20)", async () => {
+  const { executionReportProblems, EXECUTION_MODES } = await import("../src/execution.mjs");
+  assert.ok(EXECUTION_MODES.includes("range"));
+  const report = {
+    schema: "cryptophys.execution-report.v1", generated_at: "2026-11-20T05:00:00.000Z", window_days: 30,
+    modes: { scalp: {}, intraday: {}, swing: {}, range: {} },
+    trades: [{ chart: "15", bar_open: "2026-11-19T12:00:00.000Z", session: "london", mode: "range", side: "SELL", plan_r: 1, plan_exit: "target", omega_r: 0.7, omega_exit: "power_reversal", omega_size: 1 }],
+    limit: { by_mode: { range: { fill_rate: 0.5, maker_r: 0.2, taker_r: 0.1 } } }
+  };
+  assert.deepEqual(executionReportProblems(report), []);
+  assert.deepEqual(executionReportProblems({ ...report, limit: { by_mode: { range: { entry: 1 } } } }), ["forbidden_key:report.limit.by_mode.range.entry"], "a price key inside the limit block is still refused");
+});

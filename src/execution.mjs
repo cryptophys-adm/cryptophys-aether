@@ -16,7 +16,8 @@
 import { baseItem, binomialTail, CAUTION } from "./knowledge.mjs";
 
 export const EXECUTION_REPORT_SCHEMA = "cryptophys.execution-report.v1";
-export const EXECUTION_MODES = Object.freeze(["scalp", "intraday", "swing"]);
+// range: the fourth trading mode (xauusd 2026-11-18); without it every report since then was refused (modes_invalid).
+export const EXECUTION_MODES = Object.freeze(["scalp", "intraday", "swing", "range"]);
 export const EXECUTION_AGENT = "omega";
 const SESSIONS = Object.freeze(["asia", "london", "new_york", "late"]);
 const SESSION_WORD = Object.freeze({ asia: "Asia", london: "London", new_york: "New York", late: "late" });
