@@ -11,6 +11,7 @@ import { knowledgeCounts, curationProgressOf } from "./knowledge.mjs";
 import { weightingReports } from "./weighting.mjs";
 import { latestExecutionReport, executionSummary } from "./execution.mjs";
 import { latestModelReport, modelSummary } from "./model.mjs";
+import { latestLensReport } from "./lens.mjs";
 import { complianceFindings, COMPLIANCE_WARN_PER_100 } from "./guardian.mjs";
 import { doctrineView, effectiveSha } from "./doctrine.mjs";
 
@@ -206,6 +207,8 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
     execution: db ? await safe(async () => executionSummary(await latestExecutionReport(db)), null) : null,
     // xauusd's self-trained baseline model (owner 2026-11-13): what it learned and how it did.
     model: db ? await safe(async () => modelSummary(await latestModelReport(db)), null) : null,
+    // Positioning & Liquidity analyst report: latest accepted report and receipt time.
+    lens: db ? await safe(() => latestLensReport(db), null) : null,
     doctrine,
     progress: {
       curation: db ? await safe(() => curationProgressOf(db, { now }), null) : null,

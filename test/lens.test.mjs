@@ -71,6 +71,8 @@ test("LR1. ingestLensReport: xauusd's report is stored and read back; the latest
   assert.deepEqual(await storeLensReport(db, FIXTURE, { now: Date.parse("2026-11-20T11:00:05Z") }), { accepted: true });
   const later = { ...FIXTURE, generated_at: "2026-11-21T11:00:00.000Z" };
   await storeLensReport(db, later, { now: Date.parse("2026-11-21T11:00:05Z") });
+  // A delayed retry of an older report must not replace newer state.
+  await storeLensReport(db, FIXTURE, { now: Date.parse("2026-11-21T11:05:00Z") });
   const got = await latestLensReport(db);
   assert.equal(got.report.generated_at, later.generated_at);
   assert.equal(got.received_at, "2026-11-21T11:00:05.000Z");
@@ -90,6 +92,10 @@ test("LR2. refused: a wrong schema, a price-like key at any depth, a weight outs
   assert.ok(lensReportProblems(heavy).includes("weights_invalid:positioning"));
   const mode = clone(); mode.lenses.positioning.weights.weekly = { weight: 0.1, source: "anchor" };
   assert.ok(lensReportProblems(mode).includes("weights_invalid:positioning"));
+  const missingMode = clone(); delete missingMode.lenses.positioning.weights.swing;
+  assert.ok(lensReportProblems(missingMode).includes("weights_invalid:positioning"));
+  const missingLens = clone(); delete missingLens.lenses.liquidity;
+  assert.ok(lensReportProblems(missingLens).includes("lens_invalid:liquidity"));
   const lens = clone(); lens.lenses.sentiment = lens.lenses.positioning;
   assert.ok(lensReportProblems(lens).includes("lenses_invalid"));
   const big = clone(); big.lenses.positioning.note = "x".repeat(40_000);

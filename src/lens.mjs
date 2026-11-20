@@ -33,9 +33,12 @@ export function lensReportProblems(report) {
   else {
     for (const name of LENS_REPORT_LENSES) {
       const l = report.lenses[name];
-      if (l == null) continue;
       if (!isObject(l) || typeof l.enabled !== "boolean" || typeof l.floored !== "boolean" || !isObject(l.weights)) { out.push(`lens_invalid:${name}`); continue; }
-      const badMode = Object.entries(l.weights).some(([m, w]) => !MODES.includes(m) || !isObject(w) || !share(w.weight) || !(typeof w.source === "string" && SOURCE.test(w.source)));
+      const modes = Object.keys(l.weights);
+      const badMode = modes.length !== MODES.length || MODES.some((m) => {
+        const w = l.weights[m];
+        return !isObject(w) || !share(w.weight) || !(typeof w.source === "string" && SOURCE.test(w.source));
+      }) || modes.some((m) => !MODES.includes(m));
       if (badMode) out.push(`weights_invalid:${name}`);
     }
     if (!LENS_REPORT_LENSES.some((n) => report.lenses[n] != null)) out.push("lenses_invalid");
@@ -67,7 +70,7 @@ export async function storeLensReport(db, report, { now = Date.now() } = {}) {
   if (problems.length) return { accepted: false, reason: problems.slice(0, 5).join(", ") };
   if (!db) return { accepted: false, reason: "unavailable" };
   await ensureSchema(db);
-  await db.prepare("INSERT INTO lens_reports (id, report_json, generated_at, received_at) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET report_json = excluded.report_json, generated_at = excluded.generated_at, received_at = excluded.received_at")
+  await db.prepare("INSERT INTO lens_reports (id, report_json, generated_at, received_at) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET report_json = excluded.report_json, generated_at = excluded.generated_at, received_at = excluded.received_at WHERE excluded.generated_at >= lens_reports.generated_at")
     .bind(JSON.stringify(report), String(report.generated_at), new Date(now).toISOString()).run();
   return { accepted: true };
 }
