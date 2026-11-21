@@ -2,8 +2,10 @@
 // breakglass 2026-11-20). xauusd sends cryptophys.lens-report.v1 through KnowledgeIngress.ingestLensReport: per lens
 // the weight in force per trading mode with its source (anchor, aether, floor_rollback, switch_off, ...), the outcome
 // score, whether the lens sits at its floor, lens B's baseline and lens A's report age. Shares, counts and times only;
-// never a price, level or size. Aether keeps the latest valid report for the overview and the Knowledge Council; it
-// changes nothing in xauusd (the knobs move only through the doctrine protocol, src/doctrine.mjs lensPolicy).
+// never a price, level or size. Aether keeps the latest valid report for the overview (src/reader.mjs aetherOverview)
+// only. The Knowledge Council does not read it: its input is the separate Nexus-seat doctrine facts xauusd reports
+// hourly (ingestDoctrineFacts). Nothing here changes xauusd: the knobs move only through the doctrine protocol
+// (src/doctrine.mjs lensPolicy).
 
 export const LENS_REPORT_SCHEMA = "cryptophys.lens-report.v1";
 export const LENS_REPORT_LENSES = Object.freeze(["positioning", "liquidity"]);
