@@ -383,7 +383,18 @@ export async function syncAmendments(env, { now = Date.now() } = {}) {
       .bind(a.amendment_id, a.rule, a.action, JSON.stringify(a.values ?? {}), JSON.stringify(a.previous ?? {}), String(a.canon ?? ""), String(a.session ?? ""), a.executed_by ?? null, a.executed_at, new Date(now).toISOString()).run();
     if (Number(res?.meta?.changes)) applied += 1;
   }
-  return { status: "ok", applied };
+  // A proposal Cerebrum executed is marked executed (it stayed pending_owner after the owner's click,
+  // since the propose answer is the only status the council saw; production 2026-11-19 to 11-22).
+  const marked = await markExecutedProposals(db);
+  return { status: "ok", applied, marked };
+}
+
+/** Every council proposal whose amendment Cerebrum executed (doctrine_applied) reads executed. Idempotent. */
+export async function markExecutedProposals(db) {
+  try {
+    const r = await db.prepare("UPDATE council_proposals SET status = 'executed' WHERE status <> 'executed' AND proposal_id IN (SELECT amendment_id FROM doctrine_applied)").run();
+    return Number(r?.meta?.changes) || 0;
+  } catch { return 0; }
 }
 
 export const sessionIdAt = (now) => "kc_" + new Date(now).toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-").toLowerCase();
@@ -406,7 +417,10 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
     for (const item of review.filter((x) => x.status === "propose")) {
       if (proposals.filter((p) => p.status !== "skipped").length >= MAX_PROPOSALS_PER_SESSION) break;
       const valuesJson = JSON.stringify(item.proposal.params.values);
-      const recent = await db.prepare("SELECT status FROM council_proposals WHERE rule_id = ? AND values_json = ? AND created_at >= ? AND status NOT IN ('failed', 'unavailable') ORDER BY created_at DESC LIMIT 1")
+      // The same values for the same rule are not asked again within 7 days while the owner has not decided
+      // or has refused. An executed one does not count: its drift is back only because the canon moved on
+      // and dropped it (a canon change drops every live amendment), so it is proposed again.
+      const recent = await db.prepare("SELECT status FROM council_proposals WHERE rule_id = ? AND values_json = ? AND created_at >= ? AND status NOT IN ('failed', 'unavailable', 'executed') ORDER BY created_at DESC LIMIT 1")
         .bind(item.rule, valuesJson, new Date(now - PROPOSAL_COOLDOWN_MS).toISOString()).first();
       if (recent) { proposals.push({ rule: item.rule, action: item.action, status: "skipped", detail: `proposed within 7 days (${recent.status})` }); continue; }
       const r = await syscall(env, "consensus.propose", item.proposal);

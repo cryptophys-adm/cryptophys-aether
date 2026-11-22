@@ -219,3 +219,41 @@ test("B-12: Omega's policy is the doctrine in force, an amended value marked wit
   assert.deepEqual(pack.values, canon.values);
   assert.doesNotMatch(JSON.stringify(pack), /\d{4}\.\d/, "no price");
 });
+
+test("an executed proposal reads executed and no longer holds the 7-day cooldown; one still pending or refused does", async () => {
+  resetDoctrineSchemaCacheForTests();
+  const db = d1();
+  const changed = { "decision.quorum_min_intraday": 0.55 };
+  const facts = async (at) => {
+    await storeFacts(db, report(at - 2 * H, { nexus: changed }), { now: at - 2 * H });
+    await storeFacts(db, report(at - 10 * 60_000, { nexus: changed }), { now: at - 10 * 60_000 });
+  };
+  const k = kernel();
+  const env = { AETHER_DB: db, AGENTS: k };
+  await facts(NOW);
+  const first = await runCouncil(env, { now: NOW });
+  assert.deepEqual(first.proposals.map((p) => p.status), ["pending_owner"]);
+  // The next day, the owner has not decided: the same values are not asked again.
+  await facts(NOW + 24 * H);
+  const waiting = await runCouncil(env, { now: NOW + 24 * H });
+  assert.deepEqual(waiting.proposals.map((p) => [p.status, p.detail]), [["skipped", "proposed within 7 days (pending_owner)"]]);
+  assert.equal(k.proposals.length, 1);
+  // The owner executes it in Cerebrum, but against a canon the doctrine has since moved past (a canon
+  // change drops every live amendment): the hourly sync marks the proposal executed all the same.
+  const id = k.proposals[0].id;
+  k.amendments.push({ amendment_id: id, rule: "engine_thresholds", action: "amend_doctrine", values: changed, previous: {}, canon: "000000000000", session: first.session, executed_by: `owner via consensus:${id}`, executed_at: new Date(NOW + 25 * H).toISOString() });
+  const s = await syncAmendments(env, { now: NOW + 26 * H });
+  assert.deepEqual([s.applied, s.marked], [1, 1]);
+  assert.equal((await db.prepare("SELECT status FROM council_proposals WHERE proposal_id = ?").bind(id).first()).status, "executed");
+  assert.equal((await syncAmendments(env, { now: NOW + 27 * H })).marked, 0, "idempotent");
+  // The drift is still there (the amendment is not in force on this canon): the council asks again.
+  await facts(NOW + 48 * H);
+  const again = await runCouncil(env, { now: NOW + 48 * H });
+  assert.deepEqual(again.proposals.map((p) => p.status), ["pending_owner"]);
+  assert.equal(k.proposals.length, 2);
+  // Refused stays in the cooldown.
+  await db.prepare("UPDATE council_proposals SET status = 'rejected' WHERE proposal_id = ?").bind(k.proposals[1].id).run();
+  await facts(NOW + 72 * H);
+  const refused = await runCouncil(env, { now: NOW + 72 * H });
+  assert.deepEqual(refused.proposals.map((p) => p.detail), ["proposed within 7 days (rejected)"]);
+});

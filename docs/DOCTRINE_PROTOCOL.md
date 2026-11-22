@@ -46,7 +46,9 @@ text with a model.
      can update the canon.
    - `propose`: every seat involved agrees.
 3. **Proposal to Cerebrum** (`consensus.propose`). At most 3 a session. The same rule and values are
-   not proposed again for 7 days.
+   not proposed again for 7 days while the owner has not decided or has refused. A proposal Cerebrum
+   executed reads `executed` in `council_proposals` from the next hourly sync (`markExecutedProposals`)
+   and no longer counts: if its drift comes back, a canon change dropped it, and it is proposed again.
    - `amend_doctrine` (routine): operational facts only, each inside its hard bound
      (platform `control-plane-shared/src/doctrine.ts`). It executes after the vote, in consensus mode
      `routine` or higher.
