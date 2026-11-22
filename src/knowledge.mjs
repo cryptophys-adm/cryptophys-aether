@@ -357,6 +357,10 @@ function runReport(who, { now, cards, candidates, results }) {
   };
 }
 async function publishCuratorRun(env, run) { return syscall(env, CURATOR, "reports.publish", runReport("Curator", run)); }
+/** HAIC H3g (src/corrections.mjs): one page of the platform's corrections ledger, as the curator (tier 0). */
+export async function readCorrectionsPage(env, input) { return syscall(env, CURATOR, "corrections.read", input); }
+/** HAIC H3g: the curator's correction_conversion.v1 acknowledgements (a reports.publish, within its 4 an hour). */
+export async function publishCorrectionConversions(env, report) { return syscall(env, CURATOR, "reports.publish", report); }
 async function publishCalibratorRun(env, run) { return syscall(env, CALIBRATOR, "reports.publish", runReport("Calibrator", run)); }
 
 /**
@@ -420,8 +424,8 @@ export async function learnedPack(env) {
   const auto = autoShadowEnabled(env);
   const kinds = AUTO_SHADOW_KINDS.map((k) => `'${k}'`).join(", ");
   const sql = auto
-    ? `SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status = 'approved' OR (status IN ('pending', 'expired') AND kind IN (${kinds})) ORDER BY item_id, version`
-    : "SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status = 'approved' ORDER BY item_id, version";
+    ? `SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status IN ('approved', 'owner') OR (status IN ('pending', 'expired') AND kind IN (${kinds})) ORDER BY item_id, version`
+    : "SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status IN ('approved', 'owner') ORDER BY item_id, version";
   const all = (await db.prepare(sql).all()).results || [];
   // One version per item: the approved one, else the newest undecided one.
   const byId = new Map();
@@ -432,7 +436,9 @@ export async function learnedPack(env) {
   const rows = [...byId.values()];
   const items = rows.map((r) => {
     const it = JSON.parse(r.item_json);
-    return { item_id: it.item_id, version: it.version, kind: it.kind, label: "learned", audience: it.audience, situation: it.situation, text: it.text, params: it.params ?? null, content_sha256: r.content_sha256, proposal_id: r.proposal_id, review: r.status === "approved" ? "approved" : "auto" };
+    // HAIC H3g: an owner correction keeps label "learned" (xauusd's pack reader refuses any other) and says so in origin.
+    const owner = r.status === "owner" ? { origin: "owner_correction", weight: Number(it.weight) || 1, correction_id: it.correction_id } : {};
+    return { item_id: it.item_id, version: it.version, kind: it.kind, label: "learned", audience: it.audience, situation: it.situation, text: it.text, params: it.params ?? null, content_sha256: r.content_sha256, proposal_id: r.proposal_id, review: r.status === "approved" ? "approved" : r.status === "owner" ? "owner" : "auto", ...owner };
   });
   const body = JSON.stringify(items);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));

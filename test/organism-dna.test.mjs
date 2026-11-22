@@ -169,7 +169,8 @@ test("D2. the agents are exactly those the code acts as on the kernel, each usin
   // syscall(env, CURATOR | CALIBRATOR, "<capability>"): as that agent only. Owner 2026-11-14 ("jangan pensiun aether
   // calibrator karena cara kerjanya memang idle sampai jadwalnya kerja"): the curator's and the calibrator's daily run reports.
   const named = [...k.matchAll(/syscall\(env, (CURATOR|CALIBRATOR), "([a-z]+\.[a-z_]+)"/g)].map((m) => ({ site: `${enclosingFunction(k, m.index)}:${m[1]}:${m[2]}`, id: m[1] === "CURATOR" ? CURATOR : CALIBRATOR, capability: m[2] }));
-  assert.deepEqual(named.map((x) => x.site), ["publishCuratorRun:CURATOR:reports.publish", "publishCalibratorRun:CALIBRATOR:reports.publish"], "the syscalls knowledge.mjs makes as a named agent");
+  // HAIC H3g: the curator reads the platform's corrections and acknowledges them (src/corrections.mjs).
+  assert.deepEqual(named.map((x) => x.site), ["publishCuratorRun:CURATOR:reports.publish", "readCorrectionsPage:CURATOR:corrections.read", "publishCorrectionConversions:CURATOR:reports.publish", "publishCalibratorRun:CALIBRATOR:reports.publish"], "the syscalls knowledge.mjs makes as a named agent");
   for (const x of named) add(x.id, [x.capability]);
   const calls = [...k.matchAll(/(?<!function )\bsyscall\(env, /g)].length;
   assert.equal([...k.matchAll(/(?<!function )\bsyscall\(env, (?:agentId|CURATOR|CALIBRATOR), "[a-z]+\.[a-z_]+"/g)].length, calls, "every syscall in knowledge.mjs names its capability and acts as agentId, CURATOR or CALIBRATOR");
