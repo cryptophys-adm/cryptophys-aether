@@ -454,7 +454,7 @@ export async function learnedPack(env) {
   const rows = [...byId.values()]
     .sort((a, b) => rank(a) - rank(b) || when(b).localeCompare(when(a)) || String(b.item_id).localeCompare(String(a.item_id)))
     .slice(0, PACK_MAX_ITEMS)
-    .sort((a, b) => String(a.item_id).localeCompare(String(b.item_id)) || Number(a.version) - Number(b.version));
+    .sort((a, b) => (String(a.item_id) < String(b.item_id) ? -1 : String(a.item_id) > String(b.item_id) ? 1 : Number(a.version) - Number(b.version)));
   const items = rows.map((r) => {
     const it = JSON.parse(r.item_json);
     // HAIC H3g: an owner correction keeps label "learned" (xauusd's pack reader refuses any other) and says so in origin.
