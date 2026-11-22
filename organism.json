@@ -47,7 +47,8 @@
           "capabilities": [
             "reports.publish",
             "knowledge.propose",
-            "knowledge.status"
+            "knowledge.status",
+            "corrections.read"
           ],
           "tier_max": 1,
           "voter": false,
@@ -155,7 +156,8 @@
         "KNOWLEDGE_COUNCIL": "propose"
       },
       "code_defaults": {
-        "KNOWLEDGE_AUTO_SHADOW": "on"
+        "KNOWLEDGE_AUTO_SHADOW": "on",
+        "OWNER_CORRECTIONS_PACK": "on"
       },
       "storage": {
         "d1": [
@@ -164,7 +166,7 @@
             "database_name": "aether-knowledge",
             "provisioned_by": "wrangler automatic resource provisioning (no database_id in wrangler.jsonc)",
             "schema": "runtime (CREATE TABLE IF NOT EXISTS in src/)",
-            "tables": ["aether_meta", "ai_usage", "canon_vectors", "council_proposals", "council_sessions", "decision_cards", "doctrine_applied", "doctrine_facts", "execution_reports", "ingest_log", "knowledge_items", "lens_reports", "model_reports", "weighting_reports", "weighting_reports_tf"]
+            "tables": ["aether_meta", "ai_usage", "canon_vectors", "correction_conversions", "council_proposals", "council_sessions", "decision_cards", "doctrine_applied", "doctrine_facts", "execution_reports", "ingest_log", "knowledge_items", "lens_reports", "model_reports", "weighting_reports", "weighting_reports_tf"]
           }
         ],
         "vectorize": [
@@ -197,6 +199,7 @@
         { "step": "embed_cards", "utc_hour": null },
         { "step": "knowledge_reviews", "utc_hour": null },
         { "step": "doctrine_amendments", "utc_hour": null },
+        { "step": "corrections", "utc_hour": null },
         { "step": "digest", "utc_hour": 1 },
         { "step": "curation", "utc_hour": 2 },
         { "step": "curation_carry", "utc_hour": null },
@@ -205,7 +208,7 @@
       "agents": [
         { "id": "aether-guardian", "module": "src/guardian.mjs", "uses": ["reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0027" },
         { "id": "aether-auditor", "module": "src/guardian.mjs", "uses": ["reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0027" },
-        { "id": "aether-curator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
+        { "id": "aether-curator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status", "reports.publish", "corrections.read"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029; corrections.read by HAIC H3e (migration 0086)" },
         { "id": "aether-calibrator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
         { "id": "knowledge-council", "module": "src/doctrine.mjs", "uses": ["consensus.propose", "doctrine.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0045" }
       ]

@@ -29,6 +29,7 @@ import { syncCanon, embedPendingCards, indexStatus } from "./indexes.mjs";
 import { runDigest } from "./guardian.mjs";
 import { usageToday } from "./usage.mjs";
 import { runCuration, curationCarried, syncReviews, learnedPack, knowledgeCounts } from "./knowledge.mjs";
+import { runCorrections } from "./corrections.mjs";
 import { storeWeightingReport, weightingReports } from "./weighting.mjs";
 import { storeExecutionReport } from "./execution.mjs";
 import { storeModelReport } from "./model.mjs";
@@ -125,6 +126,8 @@ export default {
       await step("knowledge_reviews", () => syncReviews(env, { now }));
       // Owner 2026-11-11: the doctrine amendments Cerebrum executed, every hour; the council once a day.
       await step("doctrine_amendments", () => syncAmendments(env, { now }));
+      // HAIC H3g: the owner's Nexus corrections from the platform's ledger, every hour (src/corrections.mjs).
+      await step("corrections", () => runCorrections(env, { now }));
       if (new Date(now).getUTCHours() === 1) await step("digest", () => runDigest(env, { now }));
       if (new Date(now).getUTCHours() === 2) await step("curation", () => runCuration(env, { now, daily: true }));
       // Proposals the kernel's hourly quota left over are carried to the next hours (src/knowledge.mjs).

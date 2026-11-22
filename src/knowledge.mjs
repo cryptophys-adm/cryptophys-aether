@@ -264,7 +264,8 @@ async function mayPropose(db, itemId, now) {
  * still be inside its window at this :52; Aether then waits one more hour rather than ask for a denial.
  */
 async function kernelRoom(db, agentId, now) {
-  const hour = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND created_at >= ?").bind(agentId, new Date(now - 3_600_000).toISOString()).first();
+  // Only proposals count (an owner note from src/corrections.mjs is stored, not proposed).
+  const hour = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND proposal_id IS NOT NULL AND created_at >= ?").bind(agentId, new Date(now - 3_600_000).toISOString()).first();
   const day = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND proposal_id IS NOT NULL AND created_at >= ?").bind(agentId, new Date(now).toISOString().slice(0, 10) + "T00:00:00.000Z").first();
   return Math.max(0, Math.min(KERNEL_PROPOSE_QUOTA.per_hour - (Number(hour?.n) || 0), KERNEL_PROPOSE_QUOTA.per_day - (Number(day?.n) || 0)));
 }
@@ -357,6 +358,10 @@ function runReport(who, { now, cards, candidates, results }) {
   };
 }
 async function publishCuratorRun(env, run) { return syscall(env, CURATOR, "reports.publish", runReport("Curator", run)); }
+/** HAIC H3g (src/corrections.mjs): one page of the platform's corrections ledger, as the curator (tier 0). */
+export async function readCorrectionsPage(env, input) { return syscall(env, CURATOR, "corrections.read", input); }
+/** HAIC H3g: the curator's correction_conversion.v1 acknowledgements (a reports.publish, within its 4 an hour). */
+export async function publishCorrectionConversions(env, report) { return syscall(env, CURATOR, "reports.publish", report); }
 async function publishCalibratorRun(env, run) { return syscall(env, CALIBRATOR, "reports.publish", runReport("Calibrator", run)); }
 
 /**
@@ -412,6 +417,15 @@ export const AUTO_SHADOW_KINDS = Object.freeze(["caution", "role_reminder"]);
  * Switch: KNOWLEDGE_AUTO_SHADOW = "on" (default) | "off" (approved items only, as before).
  */
 export function autoShadowEnabled(env) { return String(env?.KNOWLEDGE_AUTO_SHADOW ?? "on").trim().toLowerCase() !== "off"; }
+/**
+ * HAIC H3g: the owner's Nexus corrections in the pack (src/corrections.mjs). Switch OWNER_CORRECTIONS_PACK = "on"
+ * (default) | "off"; independent of KNOWLEDGE_AUTO_SHADOW, which governs undecided proposals only.
+ */
+export function ownerNotesInPack(env) { return String(env?.OWNER_CORRECTIONS_PACK ?? "on").trim().toLowerCase() !== "off"; }
+/** xauusd refuses a pack of more than this many items (src/aether-pack.mjs MAX_ITEMS). */
+export const PACK_MAX_ITEMS = 50;
+/** An owner note leaves the pack after this long (xauusd's verdicts do not come back to Aether yet). */
+export const OWNER_NOTE_PACK_DAYS = 30;
 
 /** The learned pack (RFC §7.3): what xauusd may test in shadow. Never canon. */
 export async function learnedPack(env) {
@@ -420,19 +434,32 @@ export async function learnedPack(env) {
   const auto = autoShadowEnabled(env);
   const kinds = AUTO_SHADOW_KINDS.map((k) => `'${k}'`).join(", ");
   const sql = auto
-    ? `SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status = 'approved' OR (status IN ('pending', 'expired') AND kind IN (${kinds})) ORDER BY item_id, version`
-    : "SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status = 'approved' ORDER BY item_id, version";
-  const all = (await db.prepare(sql).all()).results || [];
+    ? `SELECT item_id, version, item_json, content_sha256, proposal_id, status, created_at, updated_at FROM knowledge_items WHERE status IN ('approved', 'owner') OR (status IN ('pending', 'expired') AND kind IN (${kinds})) ORDER BY item_id, version`
+    : "SELECT item_id, version, item_json, content_sha256, proposal_id, status, created_at, updated_at FROM knowledge_items WHERE status IN ('approved', 'owner') ORDER BY item_id, version";
+  const raw = (await db.prepare(sql).all()).results || [];
+  // Owner notes (HAIC H3g): behind their own switch and within OWNER_NOTE_PACK_DAYS.
+  const ownerFrom = new Date(Date.now() - OWNER_NOTE_PACK_DAYS * 86_400_000).toISOString();
+  const parsed = (r) => { try { return JSON.parse(r.item_json); } catch { return null; } };
+  const kept = raw.filter((r) => r.status !== "owner" || (ownerNotesInPack(env) && parsed(r)?.provenance?.source === "owner_correction" && String(r.updated_at ?? r.created_at ?? "") >= ownerFrom));
   // One version per item: the approved one, else the newest undecided one.
   const byId = new Map();
-  for (const r of all) {
+  for (const r of kept) {
     const prev = byId.get(r.item_id);
     if (!prev || (r.status === "approved" && prev.status !== "approved") || (r.status === prev.status && Number(r.version) > Number(prev.version)) || (prev.status !== "approved" && r.status !== "approved" && Number(r.version) > Number(prev.version))) byId.set(r.item_id, r);
   }
-  const rows = [...byId.values()];
+  // The whole pack never exceeds xauusd's PACK_MAX_ITEMS (it refuses a larger one): approved items first, then the
+  // newest undecided proposals, then the newest owner notes; the pack itself stays in item order.
+  const rank = (r) => (r.status === "approved" ? 0 : r.status === "owner" ? 2 : 1);
+  const when = (r) => String((r.status === "owner" ? parsed(r)?.provenance?.recorded_at : null) ?? r.updated_at ?? r.created_at ?? "");
+  const rows = [...byId.values()]
+    .sort((a, b) => rank(a) - rank(b) || when(b).localeCompare(when(a)) || String(b.item_id).localeCompare(String(a.item_id)))
+    .slice(0, PACK_MAX_ITEMS)
+    .sort((a, b) => (String(a.item_id) < String(b.item_id) ? -1 : String(a.item_id) > String(b.item_id) ? 1 : Number(a.version) - Number(b.version)));
   const items = rows.map((r) => {
     const it = JSON.parse(r.item_json);
-    return { item_id: it.item_id, version: it.version, kind: it.kind, label: "learned", audience: it.audience, situation: it.situation, text: it.text, params: it.params ?? null, content_sha256: r.content_sha256, proposal_id: r.proposal_id, review: r.status === "approved" ? "approved" : "auto" };
+    // HAIC H3g: an owner correction keeps label "learned" (xauusd's pack reader refuses any other) and says so in origin.
+    const owner = r.status === "owner" ? { origin: "owner_correction", weight: Number(it.weight) || 1, correction_id: it.correction_id } : {};
+    return { item_id: it.item_id, version: it.version, kind: it.kind, label: "learned", audience: it.audience, situation: it.situation, text: it.text, params: it.params ?? null, content_sha256: r.content_sha256, proposal_id: r.proposal_id, review: r.status === "approved" ? "approved" : r.status === "owner" ? "owner" : "auto", ...owner };
   });
   const body = JSON.stringify(items);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
