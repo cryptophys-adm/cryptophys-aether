@@ -177,8 +177,9 @@ async function storeOutcome(db, c, out, now) {
   await db.prepare("INSERT INTO correction_conversions (correction_id, status, item_id, reason, weight, supersedes, target_ref, seat, created_at, converted_at, acked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)")
     .bind(c.correction_id, out.status, out.item?.item_id ?? null, out.reason ?? null, Number(c.weight) || null, c.supersedes ?? null, c?.target?.ref ?? null, seat, String(c.created_at ?? at), at).run();
   // The owner's newer word on the same seat and target retires the older note, whatever the newer one became (a
-  // thumbs-up after a correction retires it too), down the whole chain (A <- B <- C).
-  await retireSuperseded(db, c, seat, at);
+  // thumbs-up after a correction retires it too), down the whole chain (A <- B <- C). Only the owner's own record
+  // (valid, weight 3) retires: the platform does not tie supersedes to the same actor.
+  if (!validateCorrection(c).length && c.weight === OWNER_WEIGHT) await retireSuperseded(db, c, seat, at);
   return true;
 }
 

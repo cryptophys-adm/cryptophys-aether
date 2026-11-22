@@ -437,21 +437,24 @@ export async function learnedPack(env) {
     ? `SELECT item_id, version, item_json, content_sha256, proposal_id, status, created_at, updated_at FROM knowledge_items WHERE status IN ('approved', 'owner') OR (status IN ('pending', 'expired') AND kind IN (${kinds})) ORDER BY item_id, version`
     : "SELECT item_id, version, item_json, content_sha256, proposal_id, status, created_at, updated_at FROM knowledge_items WHERE status IN ('approved', 'owner') ORDER BY item_id, version";
   const raw = (await db.prepare(sql).all()).results || [];
-  // Owner notes: behind their own switch, within OWNER_NOTE_PACK_DAYS, and never past PACK_MAX_ITEMS in total
-  // (the newest first; proposals keep their place).
+  // Owner notes (HAIC H3g): behind their own switch and within OWNER_NOTE_PACK_DAYS.
   const ownerFrom = new Date(Date.now() - OWNER_NOTE_PACK_DAYS * 86_400_000).toISOString();
-  const ownerRows = ownerNotesInPack(env) ? raw.filter((r) => r.status === "owner" && JSON.parse(r.item_json)?.provenance?.source === "owner_correction" && String(r.updated_at ?? r.created_at ?? "") >= ownerFrom) : [];
-  const others = raw.filter((r) => r.status !== "owner");
-  const room = Math.max(0, PACK_MAX_ITEMS - others.length);
-  const recordedAt = (r) => { try { return String(JSON.parse(r.item_json)?.provenance?.recorded_at ?? r.created_at); } catch { return String(r.created_at); } };
-  const all = [...others, ...ownerRows.sort((a, b) => recordedAt(b).localeCompare(recordedAt(a)) || String(b.item_id).localeCompare(String(a.item_id))).slice(0, room)];
+  const parsed = (r) => { try { return JSON.parse(r.item_json); } catch { return null; } };
+  const kept = raw.filter((r) => r.status !== "owner" || (ownerNotesInPack(env) && parsed(r)?.provenance?.source === "owner_correction" && String(r.updated_at ?? r.created_at ?? "") >= ownerFrom));
   // One version per item: the approved one, else the newest undecided one.
   const byId = new Map();
-  for (const r of all) {
+  for (const r of kept) {
     const prev = byId.get(r.item_id);
     if (!prev || (r.status === "approved" && prev.status !== "approved") || (r.status === prev.status && Number(r.version) > Number(prev.version)) || (prev.status !== "approved" && r.status !== "approved" && Number(r.version) > Number(prev.version))) byId.set(r.item_id, r);
   }
-  const rows = [...byId.values()];
+  // The whole pack never exceeds xauusd's PACK_MAX_ITEMS (it refuses a larger one): approved items first, then the
+  // newest undecided proposals, then the newest owner notes; the pack itself stays in item order.
+  const rank = (r) => (r.status === "approved" ? 0 : r.status === "owner" ? 2 : 1);
+  const when = (r) => String((r.status === "owner" ? parsed(r)?.provenance?.recorded_at : null) ?? r.updated_at ?? r.created_at ?? "");
+  const rows = [...byId.values()]
+    .sort((a, b) => rank(a) - rank(b) || when(b).localeCompare(when(a)) || String(b.item_id).localeCompare(String(a.item_id)))
+    .slice(0, PACK_MAX_ITEMS)
+    .sort((a, b) => String(a.item_id).localeCompare(String(b.item_id)) || Number(a.version) - Number(b.version));
   const items = rows.map((r) => {
     const it = JSON.parse(r.item_json);
     // HAIC H3g: an owner correction keeps label "learned" (xauusd's pack reader refuses any other) and says so in origin.

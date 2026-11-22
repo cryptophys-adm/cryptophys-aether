@@ -180,6 +180,11 @@ test("CV5 the owner's latest word retires the older note on the same seat and ta
   const ids = (await learnedPack(h.env)).items.map((x) => x.item_id);
   assert.ok(!ids.includes(`k-cor-${cid(1).slice(4)}`), "a thumbs-up after a correction retires the correction's note");
   assert.ok(ids.includes(`k-cor-${cid(2).slice(4)}`), "another seat's note on the same card stays");
+  // A weight-1 record from another Access user never retires the owner's note.
+  const other = [NEXUS({ correction_id: cid(7) }), NEXUS({ correction_id: cid(8), supersedes: cid(7), weight: 1, actor: "nexus:viewer@example.com", category: "good_call", rating: "up", text: null })];
+  const h3 = await harness((cursor) => (cursor ? { corrections: [], next_cursor: null } : { corrections: other, next_cursor: "c1" }));
+  await runCorrections(h3.env, { now: NOW });
+  assert.ok((await learnedPack(h3.env)).items.some((x) => x.item_id === `k-cor-${cid(7).slice(4)}`), "the owner's note stays");
   // A chain A <- B (not convertible) <- C retires A too.
   const chain = [NEXUS({ correction_id: cid(4) }), NEXUS({ correction_id: cid(5), supersedes: cid(4), category: null }), NEXUS({ correction_id: cid(6), supersedes: cid(5), category: "invalidation_too_tight" })];
   const h2 = await harness((cursor) => (cursor ? { corrections: [], next_cursor: null } : { corrections: chain, next_cursor: "c1" }));
@@ -200,6 +205,18 @@ test("CV6 the pack never exceeds xauusd's 50 items (the newest owner notes fill 
   assert.equal(pack.items.length, 50);
   assert.ok(pack.items.some((x) => x.item_id === `k-cor-${cid(159).slice(4)}`), "the newest stays");
   assert.equal((await learnedPack({ ...h.env, OWNER_CORRECTIONS_PACK: "off" })).items.length, 0);
+  // The cap holds for the whole pack: 55 undecided proposals and no owner note give 50, the newest first.
+  resetKnowledgeSchemaCacheForTests();
+  const db2 = d1();
+  await learnedPack({ AETHER_DB: db2 });
+  for (let i = 0; i < 55; i++) {
+    const at = new Date(NOW - (55 - i) * 60_000).toISOString();
+    db2.raw.prepare("INSERT INTO knowledge_items (item_id, version, kind, agent_id, item_json, status, proposal_id, content_sha256, detail, created_at, updated_at) VALUES (?, 1, 'caution', 'aether-curator', ?, 'expired', ?, NULL, NULL, ?, ?)")
+      .run(`k-x-${String(i).padStart(2, "0")}`, JSON.stringify({ item_id: `k-x-${String(i).padStart(2, "0")}`, version: 1, kind: "caution", audience: { agents: ["m15_room"], charts: ["15"] }, text: "x" }), `p${i}`, at, at);
+  }
+  const capped = (await learnedPack({ AETHER_DB: db2 })).items;
+  assert.equal(capped.length, 50);
+  assert.ok(!capped.some((x) => x.item_id === "k-x-00") && capped.some((x) => x.item_id === "k-x-54"), "the oldest undecided ones leave first");
 });
 
 test("CV7 a 5-page feed takes two runs; a re-read page stores nothing twice; a failed publish keeps the acks for the next run; numeric owner text is refused", async () => {
