@@ -120,7 +120,7 @@
         {
           "name": "KnowledgeIngress",
           "kind": "rpc",
-          "methods": ["ingestCards", "canonInfo", "learnedPack", "omegaPolicy", "ingestWeightingReport", "ingestDoctrineFacts", "ingestExecutionReport", "ingestModelReport"],
+          "methods": ["ingestCards", "canonInfo", "learnedPack", "omegaPolicy", "ingestWeightingReport", "ingestDoctrineFacts", "ingestExecutionReport", "ingestModelReport", "lensPolicy", "ingestLensReport"],
           "callers": [
             { "service": "xauusd-ai-trading-assistant", "binding": "AETHER" }
           ]
@@ -164,7 +164,7 @@
             "database_name": "aether-knowledge",
             "provisioned_by": "wrangler automatic resource provisioning (no database_id in wrangler.jsonc)",
             "schema": "runtime (CREATE TABLE IF NOT EXISTS in src/)",
-            "tables": ["aether_meta", "ai_usage", "canon_vectors", "council_proposals", "council_sessions", "decision_cards", "doctrine_applied", "doctrine_facts", "execution_reports", "ingest_log", "knowledge_items", "model_reports", "weighting_reports", "weighting_reports_tf"]
+            "tables": ["aether_meta", "ai_usage", "canon_vectors", "council_proposals", "council_sessions", "decision_cards", "doctrine_applied", "doctrine_facts", "execution_reports", "ingest_log", "knowledge_items", "lens_reports", "model_reports", "weighting_reports", "weighting_reports_tf"]
           }
         ],
         "vectorize": [

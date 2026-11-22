@@ -432,6 +432,256 @@
       "source": "xauusd src/omega-engine.mjs planIntents and OMEGA_DEFAULTS; docs/SSOT.md, Omega broker engine",
       "since": "2026-11-09",
       "updated": "2026-11-11"
+    },
+    {
+      "id": "lens_positioning_liquidity",
+      "class": "operational",
+      "rule": "The Positioning & Liquidity analyst reads two lenses, in the trading mode in force, and never opens, sizes or prices a position. Lens A, positioning from the weekly CFTC report read only after its release, is a Decision Engine witness at a share of the witness weight (scalp 0.02, intraday 0.03, swing 0.05, range 0.03; the other witnesses scale by one less that share); the crowd is stretched when managed money's net sits at or beyond the percentile (scalp 0.9, intraday 0.9, swing 0.9, range 0.9, the low side one less) among the 156 weekly nets before it, and the week's flow counts beyond its standard deviations (scalp 1, intraday 1, swing 1, range 1). Lens B, liquidity from the broker's own one-minute bars against its hour of the week, is weighed in the councils (scalp 0.4, intraday 0.3, swing 0.2, range 0.3; at 0 it is muted); a tick-volume spike is at or above the percentile (scalp 0.95, intraday 0.95, swing 0.97, range 0.95), thin liquidity at or below (scalp 0.2, intraday 0.2, swing 0.2, range 0.2), and a spread spike at the median spread times (scalp 1.8, intraday 2, swing 2.5, range 2); a sweep is searched for over minutes (scalp 60, intraday 180, swing 720, range 180), equal extremes lie within ATR multiples (scalp 0.05, intraday 0.05, swing 0.08, range 0.05), and a volume node is a profile bin at or above the percentile (scalp 0.85, intraday 0.85, swing 0.85, range 0.85) of a profile over minutes (scalp 240, intraday 1440, swing 7200, range 1440). Each lens is scored on its own readings: below a hit share of 0.45 over its last 60 readings lens A, and below 0.45 over 100 lens B, drops to the floor of its weight in every mode at once, and only a newer doctrine lifts it.",
+      "template": "The Positioning & Liquidity analyst reads two lenses, in the trading mode in force, and never opens, sizes or prices a position. Lens A, positioning from the weekly CFTC report read only after its release, is a Decision Engine witness at a share of the witness weight (scalp {positioning.de_weight_scalp}, intraday {positioning.de_weight_intraday}, swing {positioning.de_weight_swing}, range {positioning.de_weight_range}; the other witnesses scale by one less that share); the crowd is stretched when managed money's net sits at or beyond the percentile (scalp {positioning.crowd_pctl_scalp}, intraday {positioning.crowd_pctl_intraday}, swing {positioning.crowd_pctl_swing}, range {positioning.crowd_pctl_range}, the low side one less) among the 156 weekly nets before it, and the week's flow counts beyond its standard deviations (scalp {positioning.flow_z_scalp}, intraday {positioning.flow_z_intraday}, swing {positioning.flow_z_swing}, range {positioning.flow_z_range}). Lens B, liquidity from the broker's own one-minute bars against its hour of the week, is weighed in the councils (scalp {liquidity.council_weight_scalp}, intraday {liquidity.council_weight_intraday}, swing {liquidity.council_weight_swing}, range {liquidity.council_weight_range}; at 0 it is muted); a tick-volume spike is at or above the percentile (scalp {liquidity.spike_pctl_scalp}, intraday {liquidity.spike_pctl_intraday}, swing {liquidity.spike_pctl_swing}, range {liquidity.spike_pctl_range}), thin liquidity at or below (scalp {liquidity.thin_pctl_scalp}, intraday {liquidity.thin_pctl_intraday}, swing {liquidity.thin_pctl_swing}, range {liquidity.thin_pctl_range}), and a spread spike at the median spread times (scalp {liquidity.spread_widen_scalp}, intraday {liquidity.spread_widen_intraday}, swing {liquidity.spread_widen_swing}, range {liquidity.spread_widen_range}); a sweep is searched for over minutes (scalp {liquidity.sweep_lookback_min_scalp}, intraday {liquidity.sweep_lookback_min_intraday}, swing {liquidity.sweep_lookback_min_swing}, range {liquidity.sweep_lookback_min_range}), equal extremes lie within ATR multiples (scalp {liquidity.pool_tol_atr_scalp}, intraday {liquidity.pool_tol_atr_intraday}, swing {liquidity.pool_tol_atr_swing}, range {liquidity.pool_tol_atr_range}), and a volume node is a profile bin at or above the percentile (scalp {liquidity.hvn_pctl_scalp}, intraday {liquidity.hvn_pctl_intraday}, swing {liquidity.hvn_pctl_swing}, range {liquidity.hvn_pctl_range}) of a profile over minutes (scalp {liquidity.profile_window_min_scalp}, intraday {liquidity.profile_window_min_intraday}, swing {liquidity.profile_window_min_swing}, range {liquidity.profile_window_min_range}). Each lens is scored on its own readings: below a hit share of {positioning.score_floor} over its last {positioning.score_window} readings lens A, and below {liquidity.score_floor} over {liquidity.score_window} lens B, drops to the floor of its weight in every mode at once, and only a newer doctrine lifts it.",
+      "anchors": [
+        {
+          "fact": "positioning.de_weight_scalp",
+          "value": 0.02,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.de_weight_intraday",
+          "value": 0.03,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.de_weight_swing",
+          "value": 0.05,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.de_weight_range",
+          "value": 0.03,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.crowd_pctl_scalp",
+          "value": 0.9,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.crowd_pctl_intraday",
+          "value": 0.9,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.crowd_pctl_swing",
+          "value": 0.9,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.crowd_pctl_range",
+          "value": 0.9,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.flow_z_scalp",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.flow_z_intraday",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.flow_z_swing",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.flow_z_range",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.council_weight_scalp",
+          "value": 0.4,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.council_weight_intraday",
+          "value": 0.3,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.council_weight_swing",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.council_weight_range",
+          "value": 0.3,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spike_pctl_scalp",
+          "value": 0.95,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spike_pctl_intraday",
+          "value": 0.95,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spike_pctl_swing",
+          "value": 0.97,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spike_pctl_range",
+          "value": 0.95,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.thin_pctl_scalp",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.thin_pctl_intraday",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.thin_pctl_swing",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.thin_pctl_range",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spread_widen_scalp",
+          "value": 1.8,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spread_widen_intraday",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spread_widen_swing",
+          "value": 2.5,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spread_widen_range",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.sweep_lookback_min_scalp",
+          "value": 60,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.sweep_lookback_min_intraday",
+          "value": 180,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.sweep_lookback_min_swing",
+          "value": 720,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.sweep_lookback_min_range",
+          "value": 180,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.pool_tol_atr_scalp",
+          "value": 0.05,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.pool_tol_atr_intraday",
+          "value": 0.05,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.pool_tol_atr_swing",
+          "value": 0.08,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.pool_tol_atr_range",
+          "value": 0.05,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.hvn_pctl_scalp",
+          "value": 0.85,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.hvn_pctl_intraday",
+          "value": 0.85,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.hvn_pctl_swing",
+          "value": 0.85,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.hvn_pctl_range",
+          "value": 0.85,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.profile_window_min_scalp",
+          "value": 240,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.profile_window_min_intraday",
+          "value": 1440,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.profile_window_min_swing",
+          "value": 7200,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.profile_window_min_range",
+          "value": 1440,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.score_floor",
+          "value": 0.45,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.score_window",
+          "value": 60,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.score_floor",
+          "value": 0.45,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.score_window",
+          "value": 100,
+          "format": "num"
+        }
+      ],
+      "source": "xauusd docs/RFC_POSITIONING_LIQUIDITY.md §7, §8; src/lens-policy.mjs LENS_KNOBS and LENS_SCORE_KNOBS",
+      "since": "2026-11-20"
     }
   ],
   "retired": [
