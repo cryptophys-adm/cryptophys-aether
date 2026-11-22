@@ -89,9 +89,22 @@ export const DOCTRINE_BOUNDS = Object.freeze({
   "calendar.blackout_after_min": { kind: "integer", min: 15, max: 120 },
   "omega.max_signal_age_min": { kind: "number", min: 5, max: 15 },
   "omega.max_spread_points": { kind: "integer", min: 20, max: 100 },
-  "omega.max_positions": { kind: "integer", min: 1, max: 3 },
-  "omega.max_daily_loss_pct": { kind: "number", min: 1, max: 5 },
-  "omega.risk_pct": { kind: "number", min: 0.1, max: 2 },
+  // Omega's risk per account profile (platform ADR-0020 Amendment 10, canonical main e3bb6538e017; owner 2026-11-21:
+  // "Ya, Custom = Aggressive"). The single omega.risk_pct, omega.max_daily_loss_pct and omega.max_positions (the
+  // settings in force) are information now, unbounded as on the platform, so the council amends risk only under the
+  // per-profile names. omega.profile and omega.effective_* are derived facts, never amended.
+  "omega.risk_pct_safe": { kind: "number", min: 0.1, max: 2 },
+  "omega.risk_pct_conservative": { kind: "number", min: 0.1, max: 5 },
+  "omega.risk_pct_aggressive": { kind: "number", min: 0.1, max: 10 },
+  "omega.risk_pct_custom": { kind: "number", min: 0.1, max: 10 },
+  "omega.max_daily_loss_pct_safe": { kind: "number", min: 0.1, max: 3 },
+  "omega.max_daily_loss_pct_conservative": { kind: "number", min: 0.1, max: 6 },
+  "omega.max_daily_loss_pct_aggressive": { kind: "number", min: 0.1, max: 10 },
+  "omega.max_daily_loss_pct_custom": { kind: "number", min: 0.1, max: 10 },
+  "omega.max_positions_safe": { kind: "integer", min: 1, max: 1 },
+  "omega.max_positions_conservative": { kind: "integer", min: 1, max: 2 },
+  "omega.max_positions_aggressive": { kind: "integer", min: 1, max: 3 },
+  "omega.max_positions_custom": { kind: "integer", min: 1, max: 3 },
   // The Positioning & Liquidity analyst's knobs (xauusd docs/RFC_POSITIONING_LIQUIDITY.md §8, owner breakglass
   // 2026-11-20): 44 per-mode facts and 4 score facts, the platform's bounds (canonical main a879288).
   ...LENS_BOUNDS
@@ -452,9 +465,13 @@ export async function doctrineView(env, { now = Date.now() } = {}) {
 // a value Aether invents. The xauusd Worker pulls this pack hourly and applies it only when the owner's
 // switch OMEGA_POLICY_AUTO is on, within its own hard bounds.
 export const OMEGA_POLICY_VERSION = "cryptophys.omega-policy.v1";
+// Since ADR-0020 Amendment 10 the risk is per profile (`risk_pct_<profile>` and so on): xauusd's policy applies the
+// single settings only (risk_pct, max_positions, max_daily_loss_pct), so the pack no longer carries them and the
+// per-profile values are information for it until xauusd reads them.
+const PROFILES = ["safe", "conservative", "aggressive", "custom"];
 const OMEGA_POLICY_FACTS = Object.freeze({
-  "omega.risk_pct": "risk_pct", "omega.max_positions": "max_positions", "omega.max_daily_loss_pct": "max_daily_loss_pct",
-  "omega.max_spread_points": "max_spread_points", "omega.max_signal_age_min": "max_signal_age_min"
+  "omega.max_spread_points": "max_spread_points", "omega.max_signal_age_min": "max_signal_age_min",
+  ...Object.fromEntries(PROFILES.flatMap((p) => ["risk_pct", "max_daily_loss_pct", "max_positions"].map((k) => [`omega.${k}_${p}`, `${k}_${p}`])))
 });
 
 /** Pure: Omega's policy from the doctrine in force; each value within the fact's bounds, else left out. */

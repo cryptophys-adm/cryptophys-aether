@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { CANON } from "../src/canon.generated.mjs";
 import {
   councilReview, effectiveDoctrine, effectiveSha, renderRule, runCouncil, storeFacts, syncAmendments, doctrineView, validateFacts,
-  resetDoctrineSchemaCacheForTests, sessionIdAt, canonShort, FACTS_SCHEMA, MAX_PROPOSALS_PER_SESSION, omegaPolicy, omegaPolicyOf, OMEGA_POLICY_VERSION
+  resetDoctrineSchemaCacheForTests, sessionIdAt, canonShort, FACTS_SCHEMA, MAX_PROPOSALS_PER_SESSION, omegaPolicy, omegaPolicyOf, OMEGA_POLICY_VERSION, DOCTRINE_BOUNDS
 } from "../src/doctrine.mjs";
 
 function d1() {
@@ -90,11 +90,11 @@ test("a drift measured twice from the same version, inside its bound: every seat
 });
 
 test("measured once, or changed between the reports: the seat keeps observing; the same value across a redeploy counts", () => {
-  const changed = { "omega.risk_pct": 1 };
+  const changed = { "omega.risk_pct_aggressive": 1 };
   const once = councilReview({ rules: asRules(), latest: seatsOf(report(NOW, { omega: changed })), previous: seatsOf(report(NOW - H)), session: "kc_x-1" }).find((r) => r.rule === "omega_execution_gates");
   assert.equal(once.status, "observing");
   assert.equal(once.seats.omega, "observing");
-  const moving = councilReview({ rules: asRules(), latest: seatsOf(report(NOW, { omega: changed })), previous: seatsOf(report(NOW - H, { omega: { "omega.risk_pct": 1.5 } })), session: "kc_x-1" }).find((r) => r.rule === "omega_execution_gates");
+  const moving = councilReview({ rules: asRules(), latest: seatsOf(report(NOW, { omega: changed })), previous: seatsOf(report(NOW - H, { omega: { "omega.risk_pct_aggressive": 1.5 } })), session: "kc_x-1" }).find((r) => r.rule === "omega_execution_gates");
   assert.equal(moving.status, "observing", "a value still moving is not proposed");
   // Owner 2026-11-11: xauusd redeploys several times a day; the same value from two versions counts.
   const redeployed = councilReview({ rules: asRules(), latest: seatsOf(report(NOW, { omega: changed, omegaVersion: "v-2" })), previous: seatsOf(report(NOW - H, { omega: changed })), session: "kc_x-1" }).find((r) => r.rule === "omega_execution_gates");
@@ -192,18 +192,27 @@ test("the template renderer keeps unknown tokens and formats each kind", () => {
 test("B-12: Omega's policy is the doctrine in force, an amended value marked with its amendment; out-of-bound values are left out", async () => {
   const canon = omegaPolicyOf(effectiveDoctrine([]));
   const canonValue = (fact) => CANON.doctrine.rules.flatMap((r) => r.anchors).find((a) => a.fact === fact).value;
+  // ADR-0020 Amendment 10: the risk is per profile; the single risk settings are no longer in the pack.
+  const profiles = ["safe", "conservative", "aggressive", "custom"];
   assert.deepEqual(canon.values, {
-    risk_pct: canonValue("omega.risk_pct"), max_positions: canonValue("omega.max_positions"), max_daily_loss_pct: canonValue("omega.max_daily_loss_pct"),
-    max_spread_points: canonValue("omega.max_spread_points"), max_signal_age_min: canonValue("omega.max_signal_age_min")
+    max_spread_points: canonValue("omega.max_spread_points"), max_signal_age_min: canonValue("omega.max_signal_age_min"),
+    ...Object.fromEntries(profiles.flatMap((p) => ["risk_pct", "max_daily_loss_pct", "max_positions"].map((k) => [`${k}_${p}`, canonValue(`omega.${k}_${p}`)])))
   });
+  assert.deepEqual([canon.values.risk_pct, canon.values.max_positions, canon.values.max_daily_loss_pct], [undefined, undefined, undefined]);
+  assert.deepEqual(profiles.map((p) => [canon.values[`risk_pct_${p}`], canon.values[`max_daily_loss_pct_${p}`], canon.values[`max_positions_${p}`]]),
+    [[1, 3, 1], [2, 6, 2], [3, 6, 2], [3, 6, 2]], "anchored at the limits in force on 2026-11-21 (owner: \"Nilai yang berjalan sekarang\")");
   assert.deepEqual(canon.amended, {});
-  const rule = CANON.doctrine.rules.find((r) => r.anchors.some((a) => a.fact === "omega.risk_pct"));
-  const amendment = { amendment_id: "cns_1", rule: rule.id, action: "amend_doctrine", values: { "omega.risk_pct": 0.4 }, canon: canonShort(), executed_at: "2026-11-12T04:00:00Z" };
+  const rule = CANON.doctrine.rules.find((r) => r.anchors.some((a) => a.fact === "omega.risk_pct_aggressive"));
+  const amendment = { amendment_id: "cns_1", rule: rule.id, action: "amend_doctrine", values: { "omega.risk_pct_aggressive": 2 }, canon: canonShort(), executed_at: "2026-11-12T04:00:00Z" };
   const amended = omegaPolicyOf(effectiveDoctrine([amendment]));
-  assert.equal(amended.values.risk_pct, 0.4);
-  assert.deepEqual(amended.amended.risk_pct, { from: canonValue("omega.risk_pct"), amendment_id: "cns_1", executed_at: "2026-11-12T04:00:00Z" });
-  const outOfBound = omegaPolicyOf(effectiveDoctrine([{ ...amendment, values: { "omega.risk_pct": 9 } }]));
-  assert.equal(outOfBound.values.risk_pct, undefined, "a value out of the fact's bounds is never sent");
+  assert.equal(amended.values.risk_pct_aggressive, 2);
+  assert.deepEqual(amended.amended.risk_pct_aggressive, { from: 3, amendment_id: "cns_1", executed_at: "2026-11-12T04:00:00Z" });
+  const outOfBound = omegaPolicyOf(effectiveDoctrine([{ ...amendment, values: { "omega.risk_pct_aggressive": 12 } }]));
+  assert.equal(outOfBound.values.risk_pct_aggressive, undefined, "a value out of the fact's bounds is never sent");
+  // The single facts are information: no bound, so an amendment naming one is constitutional (the owner's click).
+  for (const f of ["omega.risk_pct", "omega.max_positions", "omega.max_daily_loss_pct"]) assert.equal(Object.hasOwn(DOCTRINE_BOUNDS, f), false, f);
+  assert.deepEqual(DOCTRINE_BOUNDS["omega.risk_pct_conservative"], { kind: "number", min: 0.1, max: 5 });
+  assert.deepEqual(DOCTRINE_BOUNDS["omega.max_positions_safe"], { kind: "integer", min: 1, max: 1 });
   const pack = await omegaPolicy({});
   assert.equal(pack.version, OMEGA_POLICY_VERSION);
   assert.equal(pack.doctrine_sha, CANON.content_sha256);
