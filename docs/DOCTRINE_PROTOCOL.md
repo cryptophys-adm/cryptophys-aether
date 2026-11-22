@@ -49,6 +49,16 @@ text with a model.
    not proposed again for 7 days while the owner has not decided or has refused. A proposal Cerebrum
    executed reads `executed` in `council_proposals` from the next hourly sync (`markExecutedProposals`)
    and no longer counts: if its drift comes back, a canon change dropped it, and it is proposed again.
+   Before the cooldown is read, the council reads its own open proposals back through
+   `consensus.status` (tier 0, its own proposals only, at most 50 ids a call; `syncProposalStatuses`):
+   - `executed`, `rejected` or `expired` is stored on the row. Rows already final are not read again.
+   - `expired` (the owner's window closed without a decision) no longer counts, like `executed`: nothing
+     was decided, so the same values may be asked again. `rejected` keeps the 7-day cooldown.
+   - `not_found` (unknown to the platform) and `pending_owner` change nothing, so the cooldown holds
+     (fail closed). A `pending_owner` past its `expires_at` counts as pending until the platform's sweep
+     makes it read `expired`.
+   - A denial (the capability not granted yet) changes nothing and waits 6 hours
+     (`aether_meta` key `council_status_backoff_until`), as `corrections.read` does.
    - `amend_doctrine` (routine): operational facts only, each inside its hard bound
      (platform `control-plane-shared/src/doctrine.ts`). It executes after the vote, in consensus mode
      `routine` or higher.
