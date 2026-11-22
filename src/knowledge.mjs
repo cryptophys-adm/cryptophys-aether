@@ -264,7 +264,8 @@ async function mayPropose(db, itemId, now) {
  * still be inside its window at this :52; Aether then waits one more hour rather than ask for a denial.
  */
 async function kernelRoom(db, agentId, now) {
-  const hour = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND created_at >= ?").bind(agentId, new Date(now - 3_600_000).toISOString()).first();
+  // Only proposals count (an owner note from src/corrections.mjs is stored, not proposed).
+  const hour = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND proposal_id IS NOT NULL AND created_at >= ?").bind(agentId, new Date(now - 3_600_000).toISOString()).first();
   const day = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND proposal_id IS NOT NULL AND created_at >= ?").bind(agentId, new Date(now).toISOString().slice(0, 10) + "T00:00:00.000Z").first();
   return Math.max(0, Math.min(KERNEL_PROPOSE_QUOTA.per_hour - (Number(hour?.n) || 0), KERNEL_PROPOSE_QUOTA.per_day - (Number(day?.n) || 0)));
 }
@@ -416,6 +417,15 @@ export const AUTO_SHADOW_KINDS = Object.freeze(["caution", "role_reminder"]);
  * Switch: KNOWLEDGE_AUTO_SHADOW = "on" (default) | "off" (approved items only, as before).
  */
 export function autoShadowEnabled(env) { return String(env?.KNOWLEDGE_AUTO_SHADOW ?? "on").trim().toLowerCase() !== "off"; }
+/**
+ * HAIC H3g: the owner's Nexus corrections in the pack (src/corrections.mjs). Switch OWNER_CORRECTIONS_PACK = "on"
+ * (default) | "off"; independent of KNOWLEDGE_AUTO_SHADOW, which governs undecided proposals only.
+ */
+export function ownerNotesInPack(env) { return String(env?.OWNER_CORRECTIONS_PACK ?? "on").trim().toLowerCase() !== "off"; }
+/** xauusd refuses a pack of more than this many items (src/aether-pack.mjs MAX_ITEMS). */
+export const PACK_MAX_ITEMS = 50;
+/** An owner note leaves the pack after this long (xauusd's verdicts do not come back to Aether yet). */
+export const OWNER_NOTE_PACK_DAYS = 30;
 
 /** The learned pack (RFC §7.3): what xauusd may test in shadow. Never canon. */
 export async function learnedPack(env) {
@@ -424,9 +434,17 @@ export async function learnedPack(env) {
   const auto = autoShadowEnabled(env);
   const kinds = AUTO_SHADOW_KINDS.map((k) => `'${k}'`).join(", ");
   const sql = auto
-    ? `SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status IN ('approved', 'owner') OR (status IN ('pending', 'expired') AND kind IN (${kinds})) ORDER BY item_id, version`
-    : "SELECT item_id, version, item_json, content_sha256, proposal_id, status FROM knowledge_items WHERE status IN ('approved', 'owner') ORDER BY item_id, version";
-  const all = (await db.prepare(sql).all()).results || [];
+    ? `SELECT item_id, version, item_json, content_sha256, proposal_id, status, created_at, updated_at FROM knowledge_items WHERE status IN ('approved', 'owner') OR (status IN ('pending', 'expired') AND kind IN (${kinds})) ORDER BY item_id, version`
+    : "SELECT item_id, version, item_json, content_sha256, proposal_id, status, created_at, updated_at FROM knowledge_items WHERE status IN ('approved', 'owner') ORDER BY item_id, version";
+  const raw = (await db.prepare(sql).all()).results || [];
+  // Owner notes: behind their own switch, within OWNER_NOTE_PACK_DAYS, and never past PACK_MAX_ITEMS in total
+  // (the newest first; proposals keep their place).
+  const ownerFrom = new Date(Date.now() - OWNER_NOTE_PACK_DAYS * 86_400_000).toISOString();
+  const ownerRows = ownerNotesInPack(env) ? raw.filter((r) => r.status === "owner" && JSON.parse(r.item_json)?.provenance?.source === "owner_correction" && String(r.updated_at ?? r.created_at ?? "") >= ownerFrom) : [];
+  const others = raw.filter((r) => r.status !== "owner");
+  const room = Math.max(0, PACK_MAX_ITEMS - others.length);
+  const recordedAt = (r) => { try { return String(JSON.parse(r.item_json)?.provenance?.recorded_at ?? r.created_at); } catch { return String(r.created_at); } };
+  const all = [...others, ...ownerRows.sort((a, b) => recordedAt(b).localeCompare(recordedAt(a)) || String(b.item_id).localeCompare(String(a.item_id))).slice(0, room)];
   // One version per item: the approved one, else the newest undecided one.
   const byId = new Map();
   for (const r of all) {

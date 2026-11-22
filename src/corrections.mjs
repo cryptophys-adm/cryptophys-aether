@@ -25,6 +25,12 @@ export const CONVERSIONS_PER_REPORT = 50;
 /** After a denial (the capability not granted yet, a kill switch), the next read waits this long. */
 export const CORRECTIONS_DENIAL_BACKOFF_MS = 6 * 3_600_000;
 export const NOTE_TEXT_MAX = 300;
+/** Charts xauusd's shadow arm and live rules test (xauusd src/learned-live.mjs LIVE_RULES.charts). */
+export const TESTED_CHARTS = Object.freeze(["15", "60"]);
+/** An owner note leaves the pack after this long (xauusd's verdicts do not come back to Aether yet). */
+export const OWNER_NOTE_MAX_AGE_MS = 30 * 86_400_000;
+/** The owner's weight for a rating or correction (platform LABEL_WEIGHT); only those become "Owner correction" notes. */
+export const OWNER_WEIGHT = 3;
 
 const CAUTION_CATEGORIES = Object.freeze({
   reading_wrong: "the reading was wrong",
@@ -39,6 +45,21 @@ const CHART_WORD = Object.freeze({ "15": "quarter-hour", "60": "hourly", "240": 
 const SESSIONS = new Set(["asia", "london", "new_york", "late"]);
 const SEAT = /^seat:([a-z0-9][a-z0-9_-]{1,39})$/;
 const NUMBER3 = /\d{3,}/;
+// xauusd's live note rules (src/learned-live.mjs liveItemProblems): no price-like number, no order wording.
+const LIVE_PRICE = /\b\d{3,}(?:[.,]\d+)?\b/;
+const LIVE_ORDER = /\b(?:buy|sell|long|short|entry|stop[- ]?loss|take[- ]?profit|lot|leverage|position size)\b/i;
+// Level shorthand that names a price without three digits ("the 42.50 handle", "the 38 handle"): a decimal number,
+// or a level word with a number beside it (orchestrator review of aether#44; the platform asks the owner about it).
+const SHORTHAND = /\b\d+[.,]\d+\b|\b\d+\s*(?:handle|figure|big figure|level|zone|area|print)\b|\b(?:handle|figure|level|zone|area|print)\s+(?:at|of|near|around)?\s*\d+\b/i;
+/** Pure: why a note's text cannot become a note xauusd may promote (empty when it can). */
+export function noteTextProblems(text) {
+  const out = [];
+  if (NUMBER3.test(text) || LIVE_PRICE.test(text)) out.push("price_like_number");
+  if (LIVE_ORDER.test(text)) out.push("order_wording");
+  if (SHORTHAND.test(text)) out.push("level_shorthand");
+  if (text.includes("[redacted]") || text.includes("[level]")) out.push("masked_content");
+  return out;
+}
 
 const SCHEMA_SQL = Object.freeze([
   `CREATE TABLE IF NOT EXISTS correction_conversions (
@@ -47,6 +68,9 @@ const SCHEMA_SQL = Object.freeze([
     item_id TEXT,
     reason TEXT,
     weight INTEGER,
+    supersedes TEXT,
+    target_ref TEXT,
+    seat TEXT,
     created_at TEXT NOT NULL,
     converted_at TEXT NOT NULL,
     acked_at TEXT
@@ -83,17 +107,23 @@ export function convertCorrection(c, situation) {
   const errors = validateCorrection(c);
   if (errors.length) return { status: "not_convertible", reason: `invalid: ${errors[0]}` };
   if (c.side !== "nexus") return { status: "not_convertible", reason: "not_nexus" };
+  // Only the owner's word becomes an "Owner correction" note (weight 3); a reviewer's or another Access user's would
+  // need its own origin (orchestrator review of aether#44).
+  if (c.weight !== OWNER_WEIGHT) return { status: "not_convertible", reason: "not_owner" };
   const seat = SEAT.exec(c.target.subject)?.[1];
   if (!seat) return { status: "not_convertible", reason: "no_seat" };
+  if (seat === "moderator" || /(^|[_-])moderator$/.test(seat)) return { status: "not_convertible", reason: "seat_not_tested" };
   const kind = c.category === "rule_broken" ? "role_reminder" : CAUTION_CATEGORIES[c.category] ? "caution" : null;
   if (!kind) return { status: "not_convertible", reason: c.category === null ? "rating_only" : `category_${c.category}` };
   if (!situation || !CHART_WORD[situation.chart]) return { status: "not_convertible", reason: "no_chart" };
+  if (!TESTED_CHARTS.includes(situation.chart)) return { status: "not_convertible", reason: "chart_not_tested" };
   const what = kind === "role_reminder" ? "a rule of the role was broken" : CAUTION_CATEGORIES[c.category];
   const where = `${CHART_WORD[situation.chart]} chart${situation.session ? `, ${situation.session.replace("_", " ")} session` : ""}`;
   const head = `Owner correction for ${seat.replace(/_/g, " ")} on the ${where}: ${what}.`;
   const owner = typeof c.text === "string" ? c.text.trim() : "";
   const text = (owner ? `${head} ${owner}` : head).slice(0, NOTE_TEXT_MAX).trim();
-  if (NUMBER3.test(text) || text.includes("[redacted]")) return { status: "not_convertible", reason: "text_fails_note_rules" };
+  const problems = noteTextProblems(text);
+  if (problems.length) return { status: "not_convertible", reason: `text_fails_note_rules: ${problems[0]}` };
   const hex = c.correction_id.slice(4);
   const item = {
     schema: ITEM_SCHEMA, item_id: `k-cor-${hex}`, version: 1, kind, claim_type: "owner_correction", label: "learned",
@@ -102,7 +132,7 @@ export function convertCorrection(c, situation) {
     situation: { chart: situation.chart, session: situation.session },
     text,
     evidence: { correction_id: c.correction_id, target_ref: c.target.ref, category: c.category, rating: c.rating, as_of: c.target.as_of, evidence_refs: c.evidence_refs },
-    provenance: { source: "owner_correction", correction_id: c.correction_id, supersedes: c.supersedes, canon_sha: CANON.content_sha256, canon_version: CANON.version, card_ids: [] }
+    provenance: { source: "owner_correction", correction_id: c.correction_id, supersedes: c.supersedes, recorded_at: c.created_at, canon_sha: CANON.content_sha256, canon_version: CANON.version, card_ids: [] }
   };
   return { status: "converted", item };
 }
@@ -110,6 +140,26 @@ export function convertCorrection(c, situation) {
 async function meta(db, key) { return (await db.prepare("SELECT value FROM aether_meta WHERE key = ?").bind(key).first())?.value ?? null; }
 async function setMeta(db, key, value, now) {
   await db.prepare("INSERT INTO aether_meta (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(key, String(value), new Date(now).toISOString()).run();
+}
+
+/** Retire every owner note the correction supersedes, directly or down the chain, on the same seat and target. */
+async function retireSuperseded(db, c, seat, at) {
+  const seen = new Set();
+  let id = c.supersedes;
+  while (id && !seen.has(id) && seen.size < 50) {
+    seen.add(id);
+    const prev = await db.prepare("SELECT item_id, supersedes, target_ref, seat FROM correction_conversions WHERE correction_id = ?").bind(id).first();
+    const itemId = prev?.item_id ?? `k-cor-${String(id).slice(4)}`;
+    const row = await db.prepare("SELECT item_json FROM knowledge_items WHERE item_id = ? AND status = 'owner'").bind(itemId).first();
+    if (row) {
+      let it = null;
+      try { it = JSON.parse(row.item_json); } catch { it = null; }
+      if (it && it.audience?.agents?.[0] === seat && it.evidence?.target_ref === c?.target?.ref) {
+        await db.prepare("UPDATE knowledge_items SET status = 'superseded', updated_at = ? WHERE item_id = ? AND status = 'owner'").bind(at, itemId).run();
+      }
+    }
+    id = prev?.supersedes ?? null;
+  }
 }
 
 /** Store one correction's outcome; a converted one becomes an 'owner' item (a newer correction supersedes its note). */
@@ -122,10 +172,13 @@ async function storeOutcome(db, c, out, now) {
     const sha = await sha256Hex(JSON.stringify(item));
     await db.prepare("INSERT OR IGNORE INTO knowledge_items (item_id, version, kind, agent_id, item_json, status, proposal_id, content_sha256, detail, created_at, updated_at) VALUES (?, 1, ?, ?, ?, 'owner', NULL, ?, ?, ?, ?)")
       .bind(item.item_id, item.kind, CURATOR, JSON.stringify(item), sha, `owner_correction weight ${item.weight}`, at, at).run();
-    if (c.supersedes) await db.prepare("UPDATE knowledge_items SET status = 'superseded', updated_at = ? WHERE item_id = ? AND status = 'owner'").bind(at, `k-cor-${c.supersedes.slice(4)}`).run();
   }
-  await db.prepare("INSERT INTO correction_conversions (correction_id, status, item_id, reason, weight, created_at, converted_at, acked_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)")
-    .bind(c.correction_id, out.status, out.item?.item_id ?? null, out.reason ?? null, Number(c.weight) || null, String(c.created_at ?? at), at).run();
+  const seat = SEAT.exec(String(c?.target?.subject ?? ""))?.[1] ?? null;
+  await db.prepare("INSERT INTO correction_conversions (correction_id, status, item_id, reason, weight, supersedes, target_ref, seat, created_at, converted_at, acked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)")
+    .bind(c.correction_id, out.status, out.item?.item_id ?? null, out.reason ?? null, Number(c.weight) || null, c.supersedes ?? null, c?.target?.ref ?? null, seat, String(c.created_at ?? at), at).run();
+  // The owner's newer word on the same seat and target retires the older note, whatever the newer one became (a
+  // thumbs-up after a correction retires it too), down the whole chain (A <- B <- C).
+  await retireSuperseded(db, c, seat, at);
   return true;
 }
 
@@ -147,7 +200,8 @@ export async function runCorrections(env, { now = Date.now() } = {}) {
       const r = await readCorrectionsPage(env, { ...(cursor ? { cursor } : {}), side: "nexus" });
       if (r?.outcome === "denied") { await setMeta(db, "corrections_backoff_until", now + CORRECTIONS_DENIAL_BACKOFF_MS, now); stopped = `denied: ${String(r.reason ?? "").slice(0, 120)}`; break; }
       if (r?.outcome !== "succeeded") { stopped = r?.outcome ?? "failed"; break; }
-      const list = Array.isArray(r.result?.corrections) ? r.result.corrections.slice(0, CORRECTIONS_PAGE_MAX) : [];
+      // Every record of the page is handled before the cursor moves (a longer page than promised loses nothing).
+      const list = Array.isArray(r.result?.corrections) ? r.result.corrections.slice(0, 4 * CORRECTIONS_PAGE_MAX) : [];
       for (const c of list) {
         read += 1;
         if (typeof c?.correction_id !== "string") continue;

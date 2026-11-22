@@ -156,7 +156,8 @@
         "KNOWLEDGE_COUNCIL": "propose"
       },
       "code_defaults": {
-        "KNOWLEDGE_AUTO_SHADOW": "on"
+        "KNOWLEDGE_AUTO_SHADOW": "on",
+        "OWNER_CORRECTIONS_PACK": "on"
       },
       "storage": {
         "d1": [
