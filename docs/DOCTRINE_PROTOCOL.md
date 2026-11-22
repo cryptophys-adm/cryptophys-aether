@@ -68,10 +68,14 @@ text with a model.
 
 ## Omega's policy (B-12, 2026-11-11)
 
-- `KnowledgeIngress.omegaPolicy()` gives the xauusd Worker the Omega facts of the doctrine in force
-  (risk %, positions, daily loss %, spread, signal age), each within its fact's bound.
-- An amendment the council proposed and Cerebrum executed therefore reaches Omega's settings within an
-  hour, but only while the owner's switch `OMEGA_POLICY_AUTO` is on in xauusd.
+- `KnowledgeIngress.omegaPolicy()` gives the xauusd Worker the Omega facts of the doctrine in force,
+  each within its fact's bound: the spread and the signal age, and since ADR-0020 Amendment 10
+  (aether#40, 2026-11-22) the limits per account profile (`risk_pct_<profile>`,
+  `max_daily_loss_pct_<profile>`, `max_positions_<profile>`) as information. The single risk %,
+  positions and daily loss % are no longer in it.
+- An executed amendment of the spread or the signal age therefore reaches Omega's settings within an
+  hour, but only while the owner's switch `OMEGA_POLICY_AUTO` is on in xauusd. xauusd does not apply the
+  per-profile values: its own profile caps (`effectiveLimits`) and the owner's settings decide the risk.
 
 ## Switches
 
