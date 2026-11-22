@@ -1,5 +1,5 @@
 // The correction.v1 contract (platform docs/design/HAIC-H3.md §4; cryptophys-cloud-platform
-// workers/control-plane-shared/src/correction.ts at 62e5167), ported verbatim in behaviour and checked against the
+// workers/control-plane-shared/src/correction.ts at 72fcbe0), ported verbatim in behaviour and checked against the
 // shared fixtures in test/fixtures/correction-v1. The same port lives in xauusd (src/owner-corrections.mjs). Pure.
 
 export const CORRECTION_SCHEMA = "correction.v1";
@@ -14,6 +14,8 @@ export const CORRECTION_CATEGORIES = Object.freeze([
 export const CORRECTION_ATTESTATIONS = Object.freeze(["cerebrum_access", "xauusd_nexus_access"]);
 export const CORRECTION_REDACTIONS = Object.freeze(["secret", "price", "truncated"]);
 export const CORRECTION_TEXT_MAX = 500;
+/** The longest owner-typed category kept beside category "other". */
+export const CATEGORY_RAW_MAX = 60;
 export const CORRECTION_REFS_MAX = 10;
 export const LABEL_WEIGHT = Object.freeze({ owner_rating: 3, owner_correction: 3, owner_decision: 1, reviewer_correction: 2 });
 export const NON_OWNER_WEIGHT = 1;
@@ -22,8 +24,15 @@ const ID = /^cor_[0-9a-f]{16}$/;
 const SUBJECT = /^(agent|model|seat):[A-Za-z0-9_.:-]{1,100}$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const HEX64 = /^[0-9a-f]{64}$/;
-const PRICE_G = /(?:\d{1,3}(?:[.,\s_'’]\d{3})+(?:[.,]\d+)?|\d{3,}(?:[.,]\d+)?)/g;
-const PRICE = new RegExp(PRICE_G.source);
+/**
+ * Price-like numbers (platform correction.ts at 72fcbe0): 3+ digits, including grouped thousands, in any script's
+ * decimal digits (\p{Nd}); a letter O written for a zero (4O95, a round 4OOO: Latin, Cyrillic and Greek capital and
+ * small O) in a standalone token of 3+ digits-or-O with one O at least and either two digits or a leading digit and
+ * 4+ characters. Shorthand such as 95.50 or 4.1k is not masked (owner 2026-11-22). normalizeText has already folded
+ * full-width digits (NFKC) and dropped zero-width characters inside a number.
+ */
+const PRICE_G = /(?:(?<![\p{L}\p{Nd}])(?=[\p{Nd}OoОоΟο]*[OoОоΟο])(?=[OoОоΟο]*\p{Nd}[OoОоΟο]*\p{Nd}|\p{Nd}[\p{Nd}OoОоΟο]{3})[\p{Nd}OoОоΟο]{3,}(?:[.,][\p{Nd}OoОоΟο]+)?(?![\p{L}\p{Nd}])|\p{Nd}{1,3}(?:[.,\s_'’]\p{Nd}{3})+(?:[.,]\p{Nd}+)?|\p{Nd}{3,}(?:[.,]\p{Nd}+)?)/gu;
+const PRICE = new RegExp(PRICE_G.source, "u");
 const FORBIDDEN_KEYS = new Set(["params", "parameters", "values", "value", "change", "changes", "patch", "set", "weight_delta"]);
 const PRICE_KEY_PARTS = new Set(["price", "prices", "level", "levels", "size", "sizing", "entry", "entries", "stop", "order", "orders", "lot", "lots", "sl", "tp", "tp1", "tp2"]);
 const ALLOWED_KEYS = new Set([
@@ -63,8 +72,10 @@ export function redactText(text) {
 
 // ------------------------------------------------------------ the contract (platform correction.ts)
 const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-/** Trim and collapse every whitespace run; case is kept. */
-export const normalizeText = (s) => s.trim().replace(/\s+/g, " ");
+/** Zero-width and soft-hyphen characters, which can hide a number from the price rule (40\u200B95). */
+const INVISIBLE = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/g;
+/** NFKC (full-width digits become ASCII), invisible characters dropped, whitespace runs collapsed, case kept. */
+export const normalizeText = (s) => s.normalize("NFKC").replace(INVISIBLE, "").trim().replace(/\s+/g, " ");
 
 /** Keys that name a parameter or a price, anywhere in a value. */
 export function forbiddenCorrectionKeys(value, path = "correction") {
@@ -138,7 +149,8 @@ export async function buildCorrection(input, ctx) {
   let categoryRaw;
   if (typeof input.category === "string" && input.category.trim()) {
     if (CORRECTION_CATEGORIES.includes(input.category)) category = input.category;
-    else { category = "other"; categoryRaw = input.category.slice(0, 60); }
+    // The owner's own word, made safe as the text is (secrets redacted, prices masked), then cut to 60 characters.
+    else { category = "other"; categoryRaw = (safeText(input.category, redactions) ?? "").slice(0, CATEGORY_RAW_MAX) || undefined; }
   }
   const text = safeText(input.text, redactions);
   if (!rating && !category && !text) return { ok: false, error: "empty" };
@@ -190,7 +202,7 @@ export function validateCorrection(c) {
     else {
       if (c.text.length > CORRECTION_TEXT_MAX) errors.push("text_too_long");
       if (secretInText(c.text)) errors.push("text_carries_secret");
-      if (PRICE.test(c.text)) errors.push("text_carries_price");
+      if (PRICE.test(normalizeText(c.text))) errors.push("text_carries_price");
     }
   }
   if (!Array.isArray(c.evidence_refs) || c.evidence_refs.length > CORRECTION_REFS_MAX) errors.push("evidence_refs");
@@ -210,7 +222,11 @@ export function validateCorrection(c) {
   if (label === "owner_rating" && c.rating === null) errors.push("owner_rating_without_rating");
   if (label === "owner_correction" && c.category === null && c.text === null) errors.push("owner_correction_without_content");
   if (label === "owner_decision" && c.text === null) errors.push("owner_decision_without_reason");
-  if (c.category_raw !== undefined && (c.category !== "other" || typeof c.category_raw !== "string")) errors.push("category_raw");
+  if (c.category_raw !== undefined && (c.category !== "other" || typeof c.category_raw !== "string" || c.category_raw.length > CATEGORY_RAW_MAX)) errors.push("category_raw");
+  else if (typeof c.category_raw === "string") {
+    if (secretInText(c.category_raw)) errors.push("category_raw_carries_secret");
+    if (PRICE.test(normalizeText(c.category_raw))) errors.push("category_raw_carries_price");
+  }
   if (c.invalid_refs !== undefined && !(Number.isInteger(c.invalid_refs) && c.invalid_refs > 0)) errors.push("invalid_refs");
   return errors;
 }

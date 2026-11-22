@@ -1,16 +1,17 @@
 // HAIC H3g (platform docs/design/HAIC-H3.md §5.2, §7.3, §7.4): the owner's Nexus corrections become learned text
-// items. Every shared fixture (test/fixtures/correction-v1, copied verbatim from the platform at 62e5167) becomes a
+// items. Every shared fixture (test/fixtures/correction-v1, copied verbatim from the platform at 72fcbe0) becomes a
 // valid note or a not_convertible with its reason; the hourly run reads by cursor, stores once, acknowledges in batch.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { convertCorrection, runCorrections, correctionsView, resetCorrectionsSchemaForTests, CONVERSION_SCHEMA, CORRECTIONS_DENIAL_BACKOFF_MS } from "../src/corrections.mjs";
-import { validateCorrection, correctionContentHash, correctionDedupHash } from "../src/correction-contract.mjs";
+import { validateCorrection, correctionContentHash, correctionDedupHash, buildCorrection } from "../src/correction-contract.mjs";
 import { learnedPack, resetKnowledgeSchemaCacheForTests } from "../src/knowledge.mjs";
 
 const fixture = (p) => JSON.parse(readFileSync(new URL(`./fixtures/correction-v1/${p}`, import.meta.url), "utf8"));
 const index = fixture("index.json");
+const vectors = fixture("vectors.json");
 
 test("CV1 the contract port: every fixture's errors and both hashes, as on the platform", async () => {
   for (const f of index.files) {
@@ -22,6 +23,24 @@ test("CV1 the contract port: every fixture's errors and both hashes, as on the p
     const c = fixture(f.file);
     assert.equal(await correctionContentHash(c), c.content_sha256, f.file);
     assert.equal(await correctionDedupHash(c), c.dedup_sha256, f.file);
+  }
+});
+
+test("CV1b the build vectors (platform 72fcbe0): masked as on the platform, and an old unmasked record never converts", async () => {
+  for (const v of vectors.build) {
+    const r = await buildCorrection(v.input, v.context);
+    assert.equal(r.ok, true, v.name);
+    for (const [k, want] of Object.entries(v.expect)) assert.deepEqual(r.correction[k], want, `${v.name}: ${k}`);
+    assert.deepEqual(validateCorrection(r.correction), [], v.name);
+  }
+  for (const v of vectors.refused) assert.equal((await buildCorrection(v.input, { actor: "owner:owner@example.com", owner: true, attested_by: "xauusd_nexus_access", now: "2026-11-19T10:00:00Z", correction_id: "cor_0000000000000000" })).error, v.error, v.name);
+  // A record stored before the platform's mask (4O95 passed the old rule) is invalid now, so it never becomes a note.
+  const ctx = { actor: "owner:owner@example.com", owner: true, attested_by: "xauusd_nexus_access", now: "2026-11-22T09:00:00Z", correction_id: "cor_00000000000000c1" };
+  const base = (await buildCorrection({ side: "nexus", source: "nexus_card", category: "too_early", text: "waited too little", target: { ref: "ev:xauusd/card/d:15:1795211100000:0", subject: "seat:structure" } }, ctx)).correction;
+  for (const text of ["entered near 4O95", "sat at 4OOO", "the ４０９５ area", "at 40\u200B95"]) {
+    const old = { ...base, text };
+    assert.ok(validateCorrection(old).includes("text_carries_price"), text);
+    assert.match(convertCorrection(old, { chart: "15", session: "london" }).reason, /^invalid: /, text);
   }
 });
 
