@@ -33,9 +33,10 @@ export const STATUS_BATCH_MAX = 50;
  */
 export const STATUS_DENIAL_BACKOFF_MS = 6 * 3_600_000;
 /**
- * What consensus.status may store on a row: the owner's refusal or a closed window. Never executed: that is written by
- * markExecutedProposals only once the amendment is in doctrine_applied, so a transient doctrine.status failure cannot
- * lift the cooldown while the drift is still open (orchestrator review of aether#45).
+ * What consensus.status may store on a row: the owner's refusal or a closed window. consensus.status never writes
+ * executed; only the propose answer (a routine amendment executed at the vote) or markExecutedProposals (once the
+ * amendment is in doctrine_applied) does, so a transient doctrine.status failure cannot lift the cooldown while the drift
+ * is still open (orchestrator review of aether#45).
  */
 const STATUS_FINAL = Object.freeze(["rejected", "expired"]);
 /** The kernel's proposal id shape (`LIKE 'cns_%'` alone takes `_` as a wildcard). */

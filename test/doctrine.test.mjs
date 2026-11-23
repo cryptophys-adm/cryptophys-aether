@@ -340,6 +340,8 @@ test("a final row is never overwritten by another final answer; rows older than 
   const raced = await syncProposalStatuses({ AETHER_DB: db, AGENTS: racing }, db, { now: NOW + 2 * H });
   assert.deepEqual([raced.read, raced.updated, await rowStatusOf(db, cns(2))], [1, 0, "rejected"]);
   k.statuses[cns(1)] = "expired"; // the platform now says expired: the final row is not read again, and stays rejected
+  await insertProposal(db, cns(5), "executed", NOW);
+  k.statuses[cns(5)] = "rejected"; // an executed row is final too: never read, never overwritten
   // Older than PROPOSAL_COOLDOWN_MS: never read (nothing older can hold the cooldown).
   await insertProposal(db, cns(3), "pending_owner", NOW - 8 * 24 * H);
   // Malformed ids (LIKE 'cns_%' takes _ as a wildcard): filtered before the call, so they cannot fail a batch.
@@ -350,7 +352,7 @@ test("a final row is never overwritten by another final answer; rows older than 
   const r = await syncProposalStatuses(env, db, { now: NOW + 3 * H });
   assert.deepEqual(k.statusCalls, [[cns(4)]]);
   assert.deepEqual([r.open, r.read], [1, 1]);
-  assert.deepEqual([await rowStatusOf(db, cns(1)), await rowStatusOf(db, cns(2))], ["rejected", "rejected"]);
+  assert.deepEqual([await rowStatusOf(db, cns(1)), await rowStatusOf(db, cns(2)), await rowStatusOf(db, cns(5))], ["rejected", "rejected", "executed"]);
 });
 
 test("end to end through runCouncil: expired and rejected keep the cooldown; executed through markExecutedProposals lifts it", async () => {
