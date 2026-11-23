@@ -25,6 +25,22 @@ export const STABLE_GAP_MS = 45 * 60_000;
 export const FACTS_MAX_AGE_MS = 3 * 3_600_000;
 /** The same amendment (rule and values) is not proposed again within this window. */
 export const PROPOSAL_COOLDOWN_MS = 7 * 86_400_000;
+/** consensus.status reads at most this many of the council's own proposal ids a call (platform, 2026-11-22). */
+export const STATUS_BATCH_MAX = 50;
+/**
+ * A denied consensus.status (the capability not granted yet) waits this long before the next read. On the daily
+ * schedule it never skips a session; it is kept for the pattern corrections.read follows (and any run off schedule).
+ */
+export const STATUS_DENIAL_BACKOFF_MS = 6 * 3_600_000;
+/**
+ * What consensus.status may store on a row: the owner's refusal or a closed window. consensus.status never writes
+ * executed; only the propose answer (a routine amendment executed at the vote) or markExecutedProposals (once the
+ * amendment is in doctrine_applied) does, so a transient doctrine.status failure cannot lift the cooldown while the drift
+ * is still open (orchestrator review of aether#45).
+ */
+const STATUS_FINAL = Object.freeze(["rejected", "expired"]);
+/** The kernel's proposal id shape (`LIKE 'cns_%'` alone takes `_` as a wildcard). */
+const PROPOSAL_ID = /^cns_[0-9a-f-]{36}$/;
 /** consensus.propose allows 4 an hour; the council leaves one for the next hour's retry. */
 export const MAX_PROPOSALS_PER_SESSION = 3;
 const FACTS_KEEP_MS = 7 * 86_400_000;
@@ -314,7 +330,8 @@ export const DOCTRINE_SCHEMA_SQL = Object.freeze([
     detail TEXT,
     created_at TEXT NOT NULL
   )`,
-  "CREATE INDEX IF NOT EXISTS idx_council_proposals_rule ON council_proposals(rule_id, created_at)"
+  "CREATE INDEX IF NOT EXISTS idx_council_proposals_rule ON council_proposals(rule_id, created_at)",
+  "CREATE TABLE IF NOT EXISTS aether_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
 ]);
 let ready = false;
 export function resetDoctrineSchemaCacheForTests() { ready = false; }
@@ -397,6 +414,44 @@ export async function markExecutedProposals(db) {
   } catch { return 0; }
 }
 
+/**
+ * The council's own proposals still open within the cooldown window (no final status stored, created within
+ * PROPOSAL_COOLDOWN_MS: nothing older can hold the cooldown) are read back through consensus.status, STATUS_BATCH_MAX
+ * ids a call: one that reads rejected or expired is stored so (a final row is never overwritten). Both keep the 7-day
+ * cooldown, as a pending one does; only executed lifts it, and that comes from markExecutedProposals. not_found (not
+ * the council's, or unknown), executed and pending_owner leave the row as it is (fail closed). A pending_owner whose
+ * expires_at is past still counts as pending until the platform's sweep makes it read expired. A denial (the
+ * capability not granted yet) waits STATUS_DENIAL_BACKOFF_MS and changes nothing. Never throws.
+ */
+export async function syncProposalStatuses(env, db, { now = Date.now() } = {}) {
+  try {
+    const until = Number((await db.prepare("SELECT value FROM aether_meta WHERE key = 'council_status_backoff_until'").first())?.value) || 0;
+    if (until > now) return { status: "backoff", until: new Date(until).toISOString() };
+    const open = ((await db.prepare("SELECT DISTINCT proposal_id FROM council_proposals WHERE proposal_id LIKE 'cns_%' AND status NOT IN ('executed', 'rejected', 'expired', 'failed', 'unavailable', 'denied') AND created_at >= ? ORDER BY proposal_id").bind(new Date(now - PROPOSAL_COOLDOWN_MS).toISOString()).all()).results || [])
+      .map((r) => r.proposal_id).filter((id) => typeof id === "string" && PROPOSAL_ID.test(id));
+    let read = 0, updated = 0;
+    for (let i = 0; i < open.length; i += STATUS_BATCH_MAX) {
+      const ids = open.slice(i, i + STATUS_BATCH_MAX);
+      const r = await syscall(env, "consensus.status", { proposal_ids: ids });
+      if (r?.outcome === "denied") {
+        await db.prepare("INSERT INTO aether_meta (key, value, updated_at) VALUES ('council_status_backoff_until', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(String(now + STATUS_DENIAL_BACKOFF_MS), new Date(now).toISOString()).run();
+        return { status: "denied", reason: String(r.reason ?? "").slice(0, 160), read, updated };
+      }
+      if (r?.outcome !== "succeeded") return { status: r?.outcome ?? "failed", reason: String(r?.reason ?? "").slice(0, 160), read, updated };
+      for (const p of Array.isArray(r.result?.proposals) ? r.result.proposals : []) {
+        if (!ids.includes(p?.proposal_id)) continue;
+        read += 1;
+        if (!STATUS_FINAL.includes(p.status)) continue;
+        const res = await db.prepare("UPDATE council_proposals SET status = ? WHERE proposal_id = ? AND status NOT IN ('executed', 'rejected', 'expired')").bind(p.status, p.proposal_id).run();
+        updated += Number(res?.meta?.changes) || 0;
+      }
+    }
+    return { status: "ok", open: open.length, read, updated };
+  } catch (e) {
+    return { status: "failed", reason: String(e?.message ?? e).slice(0, 160) };
+  }
+}
+
 export const sessionIdAt = (now) => "kc_" + new Date(now).toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-").toLowerCase();
 
 /** Daily: the Knowledge Council's session. Never throws past its own steps. */
@@ -407,6 +462,8 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
   const mode = ["off", "observe", "propose"].includes(String(env.KNOWLEDGE_COUNCIL ?? "").trim()) ? String(env.KNOWLEDGE_COUNCIL).trim() : "propose";
   if (mode === "off") return { status: "off" };
   const sync = await syncAmendments(env, { now });
+  // The owner's decisions on the council's own proposals (consensus.status), before the cooldown reads them.
+  const statuses = await syncProposalStatuses(env, db, { now });
   const session = sessionIdAt(now);
   const rules = effectiveDoctrine(await appliedAmendments(db)).map((r) => ({ ...r, template: (CANON.doctrine.rules.find((c) => c.id === r.id) || {}).template, anchors: r.anchors.map((a) => ({ fact: a.fact, format: a.format, value: a.value })) }));
   const { latest, previous } = await factsPair(db, { now });
@@ -419,7 +476,9 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
       const valuesJson = JSON.stringify(item.proposal.params.values);
       // The same values for the same rule are not asked again within 7 days while the owner has not decided
       // or has refused. An executed one does not count: its drift is back only because the canon moved on
-      // and dropped it (a canon change drops every live amendment), so it is proposed again.
+      // and dropped it (a canon change drops every live amendment), so it is proposed again. A rejected or an
+      // expired one (read through consensus.status) keeps the cooldown: an ignored proposal re-asked every ~48 h
+      // would ask the owner about 15 times a month per rule (owner: "tidak perlu notif cerebrum terlalu sering").
       const recent = await db.prepare("SELECT status FROM council_proposals WHERE rule_id = ? AND values_json = ? AND created_at >= ? AND status NOT IN ('failed', 'unavailable', 'executed') ORDER BY created_at DESC LIMIT 1")
         .bind(item.rule, valuesJson, new Date(now - PROPOSAL_COOLDOWN_MS).toISOString()).first();
       if (recent) { proposals.push({ rule: item.rule, action: item.action, status: "skipped", detail: `proposed within 7 days (${recent.status})` }); continue; }
@@ -446,7 +505,7 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
     ai_status: "deterministic",
     body: { advisory: "Doctrine review; Cerebrum decides and executes every amendment.", session, mode, facts_at: latest?.received_at ?? null, open: open.slice(0, 20), proposals }
   });
-  return { status: "ok", session, mode, facts: Boolean(latest), reviewed: slim.length, open: open.length, proposals, sync, applied, report: report?.outcome ?? null };
+  return { status: "ok", session, mode, facts: Boolean(latest), reviewed: slim.length, open: open.length, proposals, sync, statuses, applied, report: report?.outcome ?? null };
 }
 
 /** The doctrine for the overview: in force, retired, the last session, the facts' freshness. Never throws. */

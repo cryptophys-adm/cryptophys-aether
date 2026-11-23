@@ -54,6 +54,21 @@ text with a model.
      `routine` or higher.
    - `amend_constitution` (critical): a constitutional rule, or a fact without a bound (for example a
      guardrail list). It executes only after one owner approval click, in mode `critical`.
+   Before the cooldown is read, the council reads its own open proposals of the last 7 days back through
+   `consensus.status` (tier 0, its own proposals only, at most 50 ids a call, ids of the kernel's shape
+   `cns_<uuid>`; `syncProposalStatuses`):
+   - `rejected` or `expired` is stored on the row; a final row is never overwritten and not read again.
+     Both keep the 7-day cooldown, like an undecided proposal (orchestrator ruling on aether#45: re-asking
+     an ignored proposal every ~48 h would ask the owner about 15 times a month per rule).
+   - Only `executed` lifts the cooldown. `consensus.status` never writes executed; only the propose answer
+     (a routine amendment executed at the vote) or `markExecutedProposals` (once the amendment is in
+     `doctrine_applied`) does, so a transient `doctrine.status` failure cannot lead to the same values
+     being proposed twice.
+   - `not_found` (unknown to the platform) and `pending_owner` change nothing, so the cooldown holds
+     (fail closed). A `pending_owner` past its `expires_at` counts as pending until the platform's sweep
+     makes it read `expired`.
+   - A denial (the capability not granted yet) changes nothing and waits 6 hours
+     (`aether_meta` key `council_status_backoff_until`), as `corrections.read` does.
 4. **Cerebrum executes.**
    - The kernel records the amendment in `doctrine_amendments`, together with the audit event
      `doctrine.amended`.
