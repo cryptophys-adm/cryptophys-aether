@@ -27,10 +27,19 @@ export const FACTS_MAX_AGE_MS = 3 * 3_600_000;
 export const PROPOSAL_COOLDOWN_MS = 7 * 86_400_000;
 /** consensus.status reads at most this many of the council's own proposal ids a call (platform, 2026-11-22). */
 export const STATUS_BATCH_MAX = 50;
-/** A denied consensus.status (the capability not granted yet) waits this long before the next read. */
+/**
+ * A denied consensus.status (the capability not granted yet) waits this long before the next read. On the daily
+ * schedule it never skips a session; it is kept for the pattern corrections.read follows (and any run off schedule).
+ */
 export const STATUS_DENIAL_BACKOFF_MS = 6 * 3_600_000;
-/** What consensus.status may say for a stored proposal; anything else, or not_found, leaves the row as it is. */
-const STATUS_FINAL = Object.freeze(["executed", "rejected", "expired"]);
+/**
+ * What consensus.status may store on a row: the owner's refusal or a closed window. Never executed: that is written by
+ * markExecutedProposals only once the amendment is in doctrine_applied, so a transient doctrine.status failure cannot
+ * lift the cooldown while the drift is still open (orchestrator review of aether#45).
+ */
+const STATUS_FINAL = Object.freeze(["rejected", "expired"]);
+/** The kernel's proposal id shape (`LIKE 'cns_%'` alone takes `_` as a wildcard). */
+const PROPOSAL_ID = /^cns_[0-9a-f-]{36}$/;
 /** consensus.propose allows 4 an hour; the council leaves one for the next hour's retry. */
 export const MAX_PROPOSALS_PER_SESSION = 3;
 const FACTS_KEEP_MS = 7 * 86_400_000;
@@ -405,9 +414,11 @@ export async function markExecutedProposals(db) {
 }
 
 /**
- * The council's own proposals that are still open (no final status stored) are read back through consensus.status,
- * STATUS_BATCH_MAX ids a call: one that reads executed, rejected or expired is stored so. not_found (not the council's,
- * or unknown) and pending_owner leave the row as it is, so the cooldown holds (fail closed). A pending_owner whose
+ * The council's own proposals still open within the cooldown window (no final status stored, created within
+ * PROPOSAL_COOLDOWN_MS: nothing older can hold the cooldown) are read back through consensus.status, STATUS_BATCH_MAX
+ * ids a call: one that reads rejected or expired is stored so (a final row is never overwritten). Both keep the 7-day
+ * cooldown, as a pending one does; only executed lifts it, and that comes from markExecutedProposals. not_found (not
+ * the council's, or unknown), executed and pending_owner leave the row as it is (fail closed). A pending_owner whose
  * expires_at is past still counts as pending until the platform's sweep makes it read expired. A denial (the
  * capability not granted yet) waits STATUS_DENIAL_BACKOFF_MS and changes nothing. Never throws.
  */
@@ -415,7 +426,8 @@ export async function syncProposalStatuses(env, db, { now = Date.now() } = {}) {
   try {
     const until = Number((await db.prepare("SELECT value FROM aether_meta WHERE key = 'council_status_backoff_until'").first())?.value) || 0;
     if (until > now) return { status: "backoff", until: new Date(until).toISOString() };
-    const open = ((await db.prepare("SELECT DISTINCT proposal_id FROM council_proposals WHERE proposal_id LIKE 'cns_%' AND status NOT IN ('executed', 'rejected', 'expired', 'failed', 'unavailable', 'denied') ORDER BY proposal_id").all()).results || []).map((r) => r.proposal_id);
+    const open = ((await db.prepare("SELECT DISTINCT proposal_id FROM council_proposals WHERE proposal_id LIKE 'cns_%' AND status NOT IN ('executed', 'rejected', 'expired', 'failed', 'unavailable', 'denied') AND created_at >= ? ORDER BY proposal_id").bind(new Date(now - PROPOSAL_COOLDOWN_MS).toISOString()).all()).results || [])
+      .map((r) => r.proposal_id).filter((id) => typeof id === "string" && PROPOSAL_ID.test(id));
     let read = 0, updated = 0;
     for (let i = 0; i < open.length; i += STATUS_BATCH_MAX) {
       const ids = open.slice(i, i + STATUS_BATCH_MAX);
@@ -424,7 +436,7 @@ export async function syncProposalStatuses(env, db, { now = Date.now() } = {}) {
         await db.prepare("INSERT INTO aether_meta (key, value, updated_at) VALUES ('council_status_backoff_until', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(String(now + STATUS_DENIAL_BACKOFF_MS), new Date(now).toISOString()).run();
         return { status: "denied", reason: String(r.reason ?? "").slice(0, 160), read, updated };
       }
-      if (r?.outcome !== "succeeded") return { status: r?.outcome ?? "failed", read, updated };
+      if (r?.outcome !== "succeeded") return { status: r?.outcome ?? "failed", reason: String(r?.reason ?? "").slice(0, 160), read, updated };
       for (const p of Array.isArray(r.result?.proposals) ? r.result.proposals : []) {
         if (!ids.includes(p?.proposal_id)) continue;
         read += 1;
@@ -463,10 +475,10 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
       const valuesJson = JSON.stringify(item.proposal.params.values);
       // The same values for the same rule are not asked again within 7 days while the owner has not decided
       // or has refused. An executed one does not count: its drift is back only because the canon moved on
-      // and dropped it (a canon change drops every live amendment), so it is proposed again. An expired one
-      // (the owner's window closed without a decision, read through consensus.status) does not count either:
-      // nothing was decided, so it may be asked again. A rejected one keeps the cooldown.
-      const recent = await db.prepare("SELECT status FROM council_proposals WHERE rule_id = ? AND values_json = ? AND created_at >= ? AND status NOT IN ('failed', 'unavailable', 'executed', 'expired') ORDER BY created_at DESC LIMIT 1")
+      // and dropped it (a canon change drops every live amendment), so it is proposed again. A rejected or an
+      // expired one (read through consensus.status) keeps the cooldown: an ignored proposal re-asked every ~48 h
+      // would ask the owner about 15 times a month per rule (owner: "tidak perlu notif cerebrum terlalu sering").
+      const recent = await db.prepare("SELECT status FROM council_proposals WHERE rule_id = ? AND values_json = ? AND created_at >= ? AND status NOT IN ('failed', 'unavailable', 'executed') ORDER BY created_at DESC LIMIT 1")
         .bind(item.rule, valuesJson, new Date(now - PROPOSAL_COOLDOWN_MS).toISOString()).first();
       if (recent) { proposals.push({ rule: item.rule, action: item.action, status: "skipped", detail: `proposed within 7 days (${recent.status})` }); continue; }
       const r = await syscall(env, "consensus.propose", item.proposal);

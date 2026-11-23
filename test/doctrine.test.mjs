@@ -40,15 +40,16 @@ const asRules = (applied = []) => effectiveDoctrine(applied).map((r) => ({ ...r,
 const seatsOf = (p) => ({ received_at: p.measured_at, measured_at: p.measured_at, seats: validateFacts(p, { now: NOW }).seats });
 
 function kernel({ execute = false, deny = false, statuses = null } = {}) {
-  const proposals = [], reports = [], amendments = [], statusCalls = [];
+  const proposals = [], reports = [], amendments = [], statusCalls = [], created = {};
   return {
-    proposals, reports, amendments, statusCalls, statuses,
+    proposals, reports, amendments, statusCalls, statuses, created, clock: null,
     async syscall(agent, capability, input) {
       assert.equal(agent, "knowledge-council", "the council speaks as its own agent");
       if (capability === "consensus.propose") {
         if (deny) return { outcome: "denied", reason: "failed: rate_limit" };
         const id = `cns_${String(proposals.length).padStart(8, "0")}-0000-4000-8000-000000000000`;
         proposals.push({ id, ...input });
+        created[id] = this.clock ?? NOW;
         if (execute && input.action === "amend_doctrine") amendments.push({ amendment_id: id, rule: input.params.rule, action: input.action, values: input.params.values, previous: input.params.previous, canon: input.params.canon, session: input.params.session, executed_by: `consensus:${id}`, executed_at: new Date(NOW + amendments.length).toISOString() });
         return { outcome: "succeeded", result: { proposal: { proposal_id: id, status: execute && input.action === "amend_doctrine" ? "executed" : "pending_owner" } } };
       }
@@ -59,7 +60,8 @@ function kernel({ execute = false, deny = false, statuses = null } = {}) {
       if (capability === "consensus.status" && this.statuses) {
         statusCalls.push(input.proposal_ids);
         assert.ok(input.proposal_ids.length >= 1 && input.proposal_ids.length <= 50, "at most 50 ids a call");
-        return { outcome: "succeeded", result: { proposals: input.proposal_ids.map((id) => this.statuses[id] ? { proposal_id: id, action: "amend_doctrine", target: "doctrine", status: this.statuses[id], owner_decision: null, decided_at: null, expires_at: null } : { proposal_id: id, status: "not_found" }) } };
+        // As the platform answers: expires_at (created + the 24 h owner window) only on pending_owner.
+        return { outcome: "succeeded", result: { proposals: input.proposal_ids.map((id) => this.statuses[id] ? { proposal_id: id, action: "amend_doctrine", target: "doctrine", status: this.statuses[id], owner_decision: null, decided_at: null, ...(this.statuses[id] === "pending_owner" ? { expires_at: new Date((created[id] ?? NOW) + 24 * 3_600_000).toISOString() } : {}) } : { proposal_id: id, status: "not_found" }) } };
       }
       return { outcome: "denied", reason: "not granted" };
     }
@@ -266,7 +268,11 @@ test("an executed proposal reads executed and no longer holds the 7-day cooldown
   assert.deepEqual(refused.proposals.map((p) => p.detail), ["proposed within 7 days (rejected)"]);
 });
 
-test("consensus.status: rejected, expired and executed are stored; not_found and pending_owner change nothing; expired lifts the cooldown, rejected keeps it", async () => {
+const cns = (n) => `cns_${String(n).padStart(8, "0")}-1111-4000-8000-000000000000`;
+const insertProposal = (db, pid, status, at) => db.prepare("INSERT INTO council_proposals (session_id, rule_id, action, values_json, proposal_id, status, detail, created_at) VALUES ('kc_x', 'r', 'amend_doctrine', '{}', ?, ?, NULL, ?)").bind(pid, status, new Date(at).toISOString()).run();
+const rowStatusOf = async (db, pid) => (await db.prepare("SELECT status FROM council_proposals WHERE proposal_id = ?").bind(pid).first())?.status;
+
+test("consensus.status: rejected and expired are stored and keep the cooldown; not_found, pending_owner (even past expires_at) and executed change nothing", async () => {
   resetDoctrineSchemaCacheForTests();
   const db = d1();
   const changed = { "decision.quorum_min_intraday": 0.55 };
@@ -276,48 +282,104 @@ test("consensus.status: rejected, expired and executed are stored; not_found and
   };
   const k = kernel({ statuses: {} });
   const env = { AETHER_DB: db, AGENTS: k };
-  await facts(NOW);
-  const first = await runCouncil(env, { now: NOW });
+  const at = async (t) => { k.clock = t; await facts(t); return runCouncil(env, { now: t }); };
+  const first = await at(NOW);
   const id = first.proposals[0].proposal_id;
+  assert.match(id, /^cns_[0-9a-f-]{36}$/);
   assert.deepEqual(first.statuses, { status: "ok", open: 0, read: 0, updated: 0 }, "nothing open yet: no call");
   assert.equal(k.statusCalls.length, 0);
-  const rowStatus = async (pid = id) => (await db.prepare("SELECT status FROM council_proposals WHERE proposal_id = ?").bind(pid).first()).status;
   // Unknown to the platform (not_found): fail closed, the row and its cooldown stay.
-  await facts(NOW + 24 * H);
-  const unknown = await runCouncil(env, { now: NOW + 24 * H });
+  const unknown = await at(NOW + 24 * H);
   assert.deepEqual(unknown.statuses, { status: "ok", open: 1, read: 1, updated: 0 });
   assert.deepEqual(unknown.proposals.map((p) => p.detail), ["proposed within 7 days (pending_owner)"]);
-  // Still pending_owner, even past its expires_at: nothing changes until the platform's sweep says expired.
+  // pending_owner with its expires_at 24 h past: still pending until the platform's sweep makes it read expired.
   k.statuses[id] = "pending_owner";
-  await facts(NOW + 48 * H);
-  assert.deepEqual((await runCouncil(env, { now: NOW + 48 * H })).proposals.map((p) => p.detail), ["proposed within 7 days (pending_owner)"]);
-  assert.equal(await rowStatus(), "pending_owner");
-  // The owner's window closed without a decision: expired is stored and the same values are asked again.
+  const seen = (await k.syscall("knowledge-council", "consensus.status", { proposal_ids: [id] })).result.proposals[0];
+  k.statusCalls.pop();
+  assert.ok(Date.parse(seen.expires_at) < NOW + 48 * H, "the platform sends an expires_at already past");
+  const late = await at(NOW + 48 * H);
+  assert.ok(k.statusCalls.length === 2);
+  assert.equal(await rowStatusOf(db, id), "pending_owner");
+  assert.deepEqual(late.proposals.map((p) => p.detail), ["proposed within 7 days (pending_owner)"]);
+  // executed through consensus.status: nothing (only markExecutedProposals writes executed).
+  k.statuses[id] = "executed";
+  const exec = await at(NOW + 60 * H);
+  assert.deepEqual([exec.statuses.updated, await rowStatusOf(db, id)], [0, "pending_owner"]);
+  assert.deepEqual(exec.proposals.map((p) => p.detail), ["proposed within 7 days (pending_owner)"], "the cooldown holds");
+  assert.equal(k.proposals.length, 1);
+  // The window closed without a decision: expired is stored, and it keeps the 7-day cooldown.
   k.statuses[id] = "expired";
-  await facts(NOW + 72 * H);
-  const asked = await runCouncil(env, { now: NOW + 72 * H });
-  assert.deepEqual(asked.statuses, { status: "ok", open: 1, read: 1, updated: 1 });
-  assert.equal(await rowStatus(), "expired");
-  assert.deepEqual(asked.proposals.map((p) => p.status), ["pending_owner"], "expired does not hold the cooldown");
+  const expired = await at(NOW + 72 * H);
+  assert.deepEqual(expired.statuses, { status: "ok", open: 1, read: 1, updated: 1 });
+  assert.equal(await rowStatusOf(db, id), "expired");
+  assert.deepEqual(expired.proposals.map((p) => p.detail), ["proposed within 7 days (expired)"], "expired keeps the cooldown");
+  assert.equal(k.proposals.length, 1, "not asked again");
+  // A final row is not read again.
+  const calls = k.statusCalls.length;
+  assert.deepEqual(await syncProposalStatuses(env, db, { now: NOW + 73 * H }), { status: "ok", open: 0, read: 0, updated: 0 });
+  assert.equal(k.statusCalls.length, calls);
+  // After the 7 days the same values are asked again.
+  const week = await at(NOW + 8 * 24 * H);
+  assert.deepEqual(week.proposals.map((p) => p.status), ["pending_owner"]);
   assert.equal(k.proposals.length, 2);
-  // The owner refuses the second one: rejected is stored and holds the cooldown.
-  const second = asked.proposals[0].proposal_id;
-  k.statuses[second] = "rejected";
-  await facts(NOW + 96 * H);
-  const refused = await runCouncil(env, { now: NOW + 96 * H });
-  assert.equal(await rowStatus(second), "rejected");
-  assert.deepEqual(refused.proposals.map((p) => p.detail), ["proposed within 7 days (rejected)"]);
-  // A final row is never read again, and never overwritten.
-  k.statuses[id] = "pending_owner";
-  k.statuses[second] = "executed";
-  const again = await syncProposalStatuses(env, db, { now: NOW + 97 * H });
-  assert.deepEqual(again, { status: "ok", open: 0, read: 0, updated: 0 });
-  assert.deepEqual([await rowStatus(), await rowStatus(second)], ["expired", "rejected"]);
-  // executed through consensus.status is stored too (the hourly doctrine sync still applies the amendment).
-  await db.prepare("INSERT INTO council_proposals (session_id, rule_id, action, values_json, proposal_id, status, detail, created_at) VALUES ('kc_x', 'r', 'amend_doctrine', '{}', 'cns_x', 'pending_owner', NULL, ?)").bind(new Date(NOW).toISOString()).run();
-  k.statuses.cns_x = "executed";
-  assert.equal((await syncProposalStatuses(env, db, { now: NOW + 98 * H })).updated, 1);
-  assert.equal(await rowStatus("cns_x"), "executed");
+});
+
+test("a final row is never overwritten by another final answer; rows older than the cooldown window and malformed ids are not read", async () => {
+  resetDoctrineSchemaCacheForTests();
+  const db = d1();
+  const k = kernel({ statuses: {} });
+  const env = { AETHER_DB: db, AGENTS: k };
+  await syncAmendments({ AETHER_DB: db }, { now: NOW }); // the schema
+  await insertProposal(db, cns(1), "pending_owner", NOW);
+  k.statuses[cns(1)] = "rejected";
+  assert.equal((await syncProposalStatuses(env, db, { now: NOW + H })).updated, 1);
+  // The guard on the UPDATE itself: a row that turned final between the read and the write keeps its status.
+  await insertProposal(db, cns(2), "pending_owner", NOW);
+  k.statuses[cns(2)] = "expired";
+  const racing = { async syscall(a, c, i) { await db.prepare("UPDATE council_proposals SET status = 'rejected' WHERE proposal_id = ?").bind(cns(2)).run(); return k.syscall(a, c, i); } };
+  const raced = await syncProposalStatuses({ AETHER_DB: db, AGENTS: racing }, db, { now: NOW + 2 * H });
+  assert.deepEqual([raced.read, raced.updated, await rowStatusOf(db, cns(2))], [1, 0, "rejected"]);
+  k.statuses[cns(1)] = "expired"; // the platform now says expired: the final row is not read again, and stays rejected
+  // Older than PROPOSAL_COOLDOWN_MS: never read (nothing older can hold the cooldown).
+  await insertProposal(db, cns(3), "pending_owner", NOW - 8 * 24 * H);
+  // Malformed ids (LIKE 'cns_%' takes _ as a wildcard): filtered before the call, so they cannot fail a batch.
+  await insertProposal(db, "cnsXbad", "pending_owner", NOW);
+  await insertProposal(db, "cns_not-a-uuid", "pending_owner", NOW);
+  k.statusCalls.length = 0;
+  await insertProposal(db, cns(4), "pending_owner", NOW);
+  const r = await syncProposalStatuses(env, db, { now: NOW + 3 * H });
+  assert.deepEqual(k.statusCalls, [[cns(4)]]);
+  assert.deepEqual([r.open, r.read], [1, 1]);
+  assert.deepEqual([await rowStatusOf(db, cns(1)), await rowStatusOf(db, cns(2))], ["rejected", "rejected"]);
+});
+
+test("end to end through runCouncil: expired and rejected keep the cooldown; executed through markExecutedProposals lifts it", async () => {
+  resetDoctrineSchemaCacheForTests();
+  const db = d1();
+  const changed = { "decision.quorum_min_intraday": 0.55 };
+  const facts = async (at) => {
+    await storeFacts(db, report(at - 2 * H, { nexus: changed }), { now: at - 2 * H });
+    await storeFacts(db, report(at - 10 * 60_000, { nexus: changed }), { now: at - 10 * 60_000 });
+  };
+  const k = kernel({ statuses: {} });
+  const env = { AETHER_DB: db, AGENTS: k };
+  const at = async (t) => { k.clock = t; await facts(t); return runCouncil(env, { now: t }); };
+  const id = (await at(NOW)).proposals[0].proposal_id;
+  for (const [status, day] of [["expired", 1], ["rejected", 2]]) {
+    k.statuses[id] = status;
+    await db.prepare("UPDATE council_proposals SET status = 'pending_owner' WHERE proposal_id = ?").bind(id).run();
+    const r = await at(NOW + day * 24 * H);
+    assert.deepEqual(r.proposals.map((p) => p.detail), [`proposed within 7 days (${status})`], status);
+  }
+  assert.equal(k.proposals.length, 1);
+  // The owner executed it: doctrine.status carries the amendment, markExecutedProposals marks it, the cooldown lifts.
+  k.amendments.push({ amendment_id: id, rule: "engine_thresholds", action: "amend_doctrine", values: changed, previous: {}, canon: "000000000000", session: "kc_x", executed_by: `owner via consensus:${id}`, executed_at: new Date(NOW + 70 * H).toISOString() });
+  delete k.statuses[id];
+  await db.prepare("UPDATE council_proposals SET status = 'pending_owner' WHERE proposal_id = ?").bind(id).run();
+  const lifted = await at(NOW + 3 * 24 * H);
+  assert.equal(await rowStatusOf(db, id), "executed");
+  assert.deepEqual(lifted.proposals.map((p) => p.status), ["pending_owner"], "proposed again: only executed lifts it");
+  assert.equal(k.proposals.length, 2);
 });
 
 test("consensus.status reads at most 50 ids a call; an answer for an id not asked is ignored", async () => {
@@ -325,22 +387,24 @@ test("consensus.status reads at most 50 ids a call; an answer for an id not aske
   const db = d1();
   const k = kernel({ statuses: {} });
   const env = { AETHER_DB: db, AGENTS: k };
-  await runCouncil({ AETHER_DB: db, KNOWLEDGE_COUNCIL: "off" }, { now: NOW });
-  await syncAmendments(env, { now: NOW }); // the schema
-  const ids = Array.from({ length: 2 * STATUS_BATCH_MAX + 3 }, (_, i) => `cns_${String(i).padStart(4, "0")}`);
-  for (const pid of ids) await db.prepare("INSERT INTO council_proposals (session_id, rule_id, action, values_json, proposal_id, status, detail, created_at) VALUES ('kc_x', 'r', 'amend_doctrine', '{}', ?, 'pending_owner', NULL, ?)").bind(pid, new Date(NOW).toISOString()).run();
-  // Rows that never reached the platform (no id) or are already final are not read.
-  await db.prepare("INSERT INTO council_proposals (session_id, rule_id, action, values_json, proposal_id, status, detail, created_at) VALUES ('kc_x', 'r', 'amend_doctrine', '{}', NULL, 'denied', 'x', ?)").bind(new Date(NOW).toISOString()).run();
+  await syncAmendments({ AETHER_DB: db }, { now: NOW }); // the schema
+  const ids = Array.from({ length: 2 * STATUS_BATCH_MAX + 3 }, (_, i) => cns(100 + i));
+  for (const pid of ids) await insertProposal(db, pid, "pending_owner", NOW);
+  // A row that never reached the platform (no id), with an open status: not read.
+  await db.prepare("INSERT INTO council_proposals (session_id, rule_id, action, values_json, proposal_id, status, detail, created_at) VALUES ('kc_x', 'r', 'amend_doctrine', '{}', NULL, 'pending_owner', NULL, ?)").bind(new Date(NOW).toISOString()).run();
   for (const pid of ids.filter((_, i) => i % 2 === 0)) k.statuses[pid] = "expired";
   const r = await syncProposalStatuses(env, db, { now: NOW });
   assert.equal(STATUS_BATCH_MAX, 50);
   assert.deepEqual(k.statusCalls.map((c) => c.length), [50, 50, 3]);
   assert.deepEqual(k.statusCalls.flat(), ids, "each open id once, in order");
   assert.deepEqual(r, { status: "ok", open: 103, read: 103, updated: 52 });
-  // A reply that names an id this call did not ask for changes nothing.
-  const rogue = { AETHER_DB: db, AGENTS: { async syscall() { return { outcome: "succeeded", result: { proposals: [{ proposal_id: "cns_other", status: "rejected" }, { proposal_id: ids[1], status: "bogus" }] } }; } } };
+  // A reply that names an id this call did not ask for, or an unknown status, changes nothing.
+  const rogue = { AETHER_DB: db, AGENTS: { async syscall() { return { outcome: "succeeded", result: { proposals: [{ proposal_id: cns(999), status: "rejected" }, { proposal_id: ids[1], status: "bogus" }] } }; } } };
   assert.deepEqual(await syncProposalStatuses(rogue, db, { now: NOW }), { status: "ok", open: 51, read: 1, updated: 0 });
-  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM council_proposals WHERE status = 'pending_owner'").first()).n, 51);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM council_proposals WHERE status = 'pending_owner'").first()).n, 52);
+  // A failed outcome returns the kernel's reason.
+  const busy = { AETHER_DB: db, AGENTS: { async syscall() { return { outcome: "failed", reason: "kernel busy" }; } } };
+  assert.deepEqual(await syncProposalStatuses(busy, db, { now: NOW }), { status: "failed", reason: "kernel busy", read: 0, updated: 0 });
 });
 
 test("consensus.status denied (not granted yet): no change to any row or the cooldown, and a 6-hour backoff like corrections.read", async () => {
@@ -377,7 +441,7 @@ test("consensus.status denied (not granted yet): no change to any row or the coo
   const db2 = d1();
   resetDoctrineSchemaCacheForTests();
   await syncAmendments({ AETHER_DB: db2 }, { now: NOW });
-  await db2.prepare("INSERT INTO council_proposals (session_id, rule_id, action, values_json, proposal_id, status, detail, created_at) VALUES ('kc_x', 'r', 'amend_doctrine', '{}', 'cns_y', 'pending_owner', NULL, ?)").bind(new Date(NOW).toISOString()).run();
+  await insertProposal(db2, cns(7), "pending_owner", NOW);
   const boom = await syncProposalStatuses({ AGENTS: { async syscall() { throw new Error("kernel down"); } } }, db2, { now: NOW });
   assert.deepEqual([boom.status, boom.updated], ["failed", 0]);
   assert.equal(await db2.prepare("SELECT value FROM aether_meta WHERE key = 'council_status_backoff_until'").first(), null);

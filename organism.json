@@ -211,7 +211,7 @@
         { "id": "aether-auditor", "module": "src/guardian.mjs", "uses": ["reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0027" },
         { "id": "aether-curator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status", "reports.publish", "corrections.read"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029; corrections.read by HAIC H3e (migration 0086)" },
         { "id": "aether-calibrator", "module": "src/knowledge.mjs", "uses": ["knowledge.propose", "knowledge.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migrations 0027, 0029" },
-        { "id": "knowledge-council", "module": "src/doctrine.mjs", "uses": ["consensus.propose", "consensus.status", "doctrine.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0045" }
+        { "id": "knowledge-council", "module": "src/doctrine.mjs", "uses": ["consensus.propose", "consensus.status", "doctrine.status", "reports.publish"], "registered_by": "cryptophys-cloud-platform migration 0045; consensus.status through the census (update_privileged_agent_capabilities, the owner's click)" }
       ]
     }
   }

@@ -49,11 +49,15 @@ text with a model.
    not proposed again for 7 days while the owner has not decided or has refused. A proposal Cerebrum
    executed reads `executed` in `council_proposals` from the next hourly sync (`markExecutedProposals`)
    and no longer counts: if its drift comes back, a canon change dropped it, and it is proposed again.
-   Before the cooldown is read, the council reads its own open proposals back through
-   `consensus.status` (tier 0, its own proposals only, at most 50 ids a call; `syncProposalStatuses`):
-   - `executed`, `rejected` or `expired` is stored on the row. Rows already final are not read again.
-   - `expired` (the owner's window closed without a decision) no longer counts, like `executed`: nothing
-     was decided, so the same values may be asked again. `rejected` keeps the 7-day cooldown.
+   Before the cooldown is read, the council reads its own open proposals of the last 7 days back through
+   `consensus.status` (tier 0, its own proposals only, at most 50 ids a call, ids of the kernel's shape
+   `cns_<uuid>`; `syncProposalStatuses`):
+   - `rejected` or `expired` is stored on the row; a final row is never overwritten and not read again.
+     Both keep the 7-day cooldown, like an undecided proposal (orchestrator ruling on aether#45: re-asking
+     an ignored proposal every ~48 h would ask the owner about 15 times a month per rule).
+   - Only `executed` lifts the cooldown, and only `markExecutedProposals` writes it, once the amendment is
+     in `doctrine_applied`; `consensus.status` reading executed changes nothing, so a transient
+     `doctrine.status` failure cannot lead to the same values being proposed twice.
    - `not_found` (unknown to the platform) and `pending_owner` change nothing, so the cooldown holds
      (fail closed). A `pending_owner` past its `expires_at` counts as pending until the platform's sweep
      makes it read `expired`.
