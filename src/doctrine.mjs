@@ -72,6 +72,17 @@ export const LENS_BOUNDS = Object.freeze({
   "liquidity.score_floor": { kind: "number", min: 0.4, max: 0.5 },
   "liquidity.score_window": { kind: "integer", min: 50, max: 300 }
 });
+/**
+ * The Mizan Oracle witness's knobs (canon rule mizan_witness; xauusd MZ1, owner 2026-11-23: "Council naik, auto mati"),
+ * the platform's bounds (control-plane-shared/src/doctrine.ts, PF2): the weight per mode from 0 (the witness at its floor)
+ * to 0.04, the floor's hit share, its window and the scored readings it needs before the floor applies.
+ */
+export const MIZAN_BOUNDS = Object.freeze({
+  ...perMode("mizan.de_weight", "number", same(0, 0.04)),
+  "mizan.score_floor": { kind: "number", min: 0.4, max: 0.6 },
+  "mizan.score_window": { kind: "integer", min: 50, max: 200 },
+  "mizan.min_readings": { kind: "integer", min: 20, max: 100 }
+});
 
 export const DOCTRINE_BOUNDS = Object.freeze({
   "decision.trading_mode": { kind: "text", in: ["scalp", "intraday", "swing"] },
@@ -123,7 +134,10 @@ export const DOCTRINE_BOUNDS = Object.freeze({
   "omega.max_positions_custom": { kind: "integer", min: 1, max: 3 },
   // The Positioning & Liquidity analyst's knobs (xauusd docs/RFC_POSITIONING_LIQUIDITY.md §8, owner breakglass
   // 2026-11-20): 44 per-mode facts and 4 score facts, the platform's bounds (canonical main a879288).
-  ...LENS_BOUNDS
+  ...LENS_BOUNDS,
+  // The Mizan Oracle witness (canon rule mizan_witness, AE2): 4 per-mode weights and 3 score facts, the platform's PF2
+  // bounds (canonical main 695b8b5).
+  ...MIZAN_BOUNDS
 });
 
 const WITNESS_WORD = Object.freeze({

@@ -94,6 +94,21 @@ text with a model.
   hour, but only while the owner's switch `OMEGA_POLICY_AUTO` is on in xauusd. xauusd does not apply the
   per-profile values: its own profile caps (`effectiveLimits`) and the owner's settings decide the risk.
 
+## The Mizan witness (AE2, 2026-11-25)
+
+Owner 2026-11-23, relayed by the coordinator: "Setuju ketiganya", "Versi netral", "Sebelum parity", "Council naik,
+auto mati". xauusd builds the witness (MZ1); Aether holds its doctrine.
+
+- **`mizan_witness`** (operational): the Mizan Oracle votes in the Decision Engine at a share of the witness weight per
+  trading mode, 0.02 each to start. Its seven facts (`mizan.de_weight_<mode>`, `mizan.score_floor`,
+  `mizan.score_window`, `mizan.min_readings`) have the platform's PF2 bounds (`MIZAN_BOUNDS`), so the council amends
+  them as routine, the weights only inside 0 to 0.04.
+- **`parity_trust_only`** (constitutional) gains the text of one exception, anchored by `parity.mizan_before_parity`,
+  `off` in the canon: when on, the witness votes while its parity group runs alongside, and a mismatch freezes it at 0
+  until 24 consecutive matches. Once xauusd reports it on, measured twice, the council proposes `amend_constitution`,
+  and only the owner's click executes it.
+- **Timing.** Until xauusd reports the eight facts, both rules read `unreported`, so this lands with MZ1.
+
 ## Switches
 
 - **`KNOWLEDGE_COUNCIL`** (Aether variable): `propose` (default), `observe` (review only) or `off`.
