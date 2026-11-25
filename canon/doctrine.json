@@ -49,8 +49,8 @@
     {
       "id": "parity_trust_only",
       "class": "constitutional",
-      "rule": "Local engine trust comes only from the autonomous parity registry (24 consecutive candles that match TradingView); nothing is marked verified by hand, and the Pine sources and hashed engines are never edited. The local lane is the decision lane (local); TradingView webhooks only calibrate it.",
-      "template": "Local engine trust comes only from the autonomous parity registry ({parity.approval_candles} consecutive candles that match TradingView); nothing is marked verified by hand, and the Pine sources and hashed engines are never edited. The local lane is the decision lane ({lanes.indicator_source}); TradingView webhooks only calibrate it.",
+      "rule": "Local engine trust comes only from the autonomous parity registry (24 consecutive candles that match TradingView); nothing is marked verified by hand, and the Pine sources and hashed engines are never edited. The local lane is the decision lane (local); TradingView webhooks only calibrate it. One exception, the Mizan witness voting before its parity (off): when on, it votes while its parity group runs alongside, and a mismatch freezes its weight at 0 until 24 consecutive candles match again.",
+      "template": "Local engine trust comes only from the autonomous parity registry ({parity.approval_candles} consecutive candles that match TradingView); nothing is marked verified by hand, and the Pine sources and hashed engines are never edited. The local lane is the decision lane ({lanes.indicator_source}); TradingView webhooks only calibrate it. One exception, the Mizan witness voting before its parity ({parity.mizan_before_parity}): when on, it votes while its parity group runs alongside, and a mismatch freezes its weight at 0 until {parity.approval_candles} consecutive candles match again.",
       "anchors": [
         {
           "fact": "parity.approval_candles",
@@ -61,11 +61,16 @@
           "fact": "lanes.indicator_source",
           "value": "local",
           "format": "text"
+        },
+        {
+          "fact": "parity.mizan_before_parity",
+          "value": false,
+          "format": "bool"
         }
       ],
-      "source": "xauusd AGENTS.md rule 6; docs/SSOT.md §3",
+      "source": "xauusd AGENTS.md rule 6; docs/SSOT.md §3; 2026-11-25: the Mizan witness's exception, off until the owner's amend_constitution click (owner 2026-11-23: \"Sebelum parity\", Aether AE2)",
       "since": "2026-10",
-      "updated": "2026-11-11"
+      "updated": "2026-11-25"
     },
     {
       "id": "fail_closed_wait",
@@ -727,6 +732,51 @@
       ],
       "source": "xauusd docs/RFC_POSITIONING_LIQUIDITY.md §7, §8; src/lens-policy.mjs LENS_KNOBS and LENS_SCORE_KNOBS",
       "since": "2026-11-20"
+    },
+    {
+      "id": "mizan_witness",
+      "class": "operational",
+      "rule": "The Mizan Oracle is a Decision Engine witness at a share of the witness weight, in the trading mode in force (scalp 0.02, intraday 0.02, swing 0.02, range 0.02; the other witnesses scale by one less that share; the Knowledge Council moves each between 0 and 0.04). It reads the Mizan Probe's net witness and prior edge, with the Markov and dollar dials neutral; its s17 and s20 readings count in its vote rather than as evidence only, and it never reads the action label or opens, sizes or prices a position. It votes from its first reading, before any outcome score; once it has 40 scored readings, a hit share below 0.45 over its last 100 readings drops its weight to 0 in every mode at once, and only a newer doctrine lifts it. Before its parity it votes only as parity_trust_only allows.",
+      "template": "The Mizan Oracle is a Decision Engine witness at a share of the witness weight, in the trading mode in force (scalp {mizan.de_weight_scalp}, intraday {mizan.de_weight_intraday}, swing {mizan.de_weight_swing}, range {mizan.de_weight_range}; the other witnesses scale by one less that share; the Knowledge Council moves each between 0 and 0.04). It reads the Mizan Probe's net witness and prior edge, with the Markov and dollar dials neutral; its s17 and s20 readings count in its vote rather than as evidence only, and it never reads the action label or opens, sizes or prices a position. It votes from its first reading, before any outcome score; once it has {mizan.min_readings} scored readings, a hit share below {mizan.score_floor} over its last {mizan.score_window} readings drops its weight to 0 in every mode at once, and only a newer doctrine lifts it. Before its parity it votes only as parity_trust_only allows.",
+      "anchors": [
+        {
+          "fact": "mizan.de_weight_scalp",
+          "value": 0.02,
+          "format": "num"
+        },
+        {
+          "fact": "mizan.de_weight_intraday",
+          "value": 0.02,
+          "format": "num"
+        },
+        {
+          "fact": "mizan.de_weight_swing",
+          "value": 0.02,
+          "format": "num"
+        },
+        {
+          "fact": "mizan.de_weight_range",
+          "value": 0.02,
+          "format": "num"
+        },
+        {
+          "fact": "mizan.score_floor",
+          "value": 0.45,
+          "format": "num"
+        },
+        {
+          "fact": "mizan.score_window",
+          "value": 100,
+          "format": "num"
+        },
+        {
+          "fact": "mizan.min_readings",
+          "value": 40,
+          "format": "num"
+        }
+      ],
+      "source": "xauusd docs/RFC_INDICATOR_ADOPTION.md (MZ1) and docs/SSOT.md, the witness group probe_mizan_witness; owner 2026-11-23, relayed by the coordinator: \"Setuju ketiganya\" (this rule; s17 and s20 no longer evidence only; it votes before any outcome score), \"Versi netral\" (the Markov and dollar dials neutral), \"Council naik, auto mati\" (the council raises the weight within 0 to 0.04; it drops to 0 below 45%); platform control-plane-shared/src/doctrine.ts, the mizan.* bounds (PF2)",
+      "since": "2026-11-25"
     }
   ],
   "retired": [
