@@ -25,6 +25,22 @@ export const STABLE_GAP_MS = 45 * 60_000;
 export const FACTS_MAX_AGE_MS = 3 * 3_600_000;
 /** The same amendment (rule and values) is not proposed again within this window. */
 export const PROPOSAL_COOLDOWN_MS = 7 * 86_400_000;
+/** consensus.status reads at most this many of the council's own proposal ids a call (platform, 2026-11-22). */
+export const STATUS_BATCH_MAX = 50;
+/**
+ * A denied consensus.status (the capability not granted yet) waits this long before the next read. On the daily
+ * schedule it never skips a session; it is kept for the pattern corrections.read follows (and any run off schedule).
+ */
+export const STATUS_DENIAL_BACKOFF_MS = 6 * 3_600_000;
+/**
+ * What consensus.status may store on a row: the owner's refusal or a closed window. consensus.status never writes
+ * executed; only the propose answer (a routine amendment executed at the vote) or markExecutedProposals (once the
+ * amendment is in doctrine_applied) does, so a transient doctrine.status failure cannot lift the cooldown while the drift
+ * is still open (orchestrator review of aether#45).
+ */
+const STATUS_FINAL = Object.freeze(["rejected", "expired"]);
+/** The kernel's proposal id shape (`LIKE 'cns_%'` alone takes `_` as a wildcard). */
+const PROPOSAL_ID = /^cns_[0-9a-f-]{36}$/;
 /** consensus.propose allows 4 an hour; the council leaves one for the next hour's retry. */
 export const MAX_PROPOSALS_PER_SESSION = 3;
 const FACTS_KEEP_MS = 7 * 86_400_000;
@@ -35,12 +51,51 @@ const MAX_FACTS_BYTES = 16_384;
  * control-plane-shared/src/doctrine.ts (DOCTRINE_BOUNDS): the Aether seat refuses what Cerebrum would.
  * A change there is a platform PR; a change here alone never widens anything Cerebrum executes.
  */
+const LENS_MODES = Object.freeze(["scalp", "intraday", "swing", "range"]);
+const perMode = (base, kind, bounds) => Object.fromEntries(LENS_MODES.map((m, i) => [`${base}_${m}`, { kind, min: bounds[i][0], max: bounds[i][1] }]));
+const same = (lo, hi) => [[lo, hi], [lo, hi], [lo, hi], [lo, hi]];
+/** The lens knobs' hard bounds, per mode in the order scalp, intraday, swing, range. */
+export const LENS_BOUNDS = Object.freeze({
+  ...perMode("positioning.de_weight", "number", [[0.02, 0.04], [0.02, 0.06], [0.02, 0.1], [0.02, 0.05]]),
+  ...perMode("positioning.crowd_pctl", "number", same(0.8, 0.95)),
+  ...perMode("positioning.flow_z", "number", same(0.5, 2)),
+  ...perMode("liquidity.council_weight", "number", [[0, 0.8], [0, 0.6], [0, 0.4], [0, 0.6]]),
+  ...perMode("liquidity.spike_pctl", "number", same(0.9, 0.99)),
+  ...perMode("liquidity.thin_pctl", "number", same(0.05, 0.3)),
+  ...perMode("liquidity.spread_widen", "number", same(1.5, 4)),
+  ...perMode("liquidity.sweep_lookback_min", "integer", [[30, 120], [60, 360], [240, 1440], [60, 360]]),
+  ...perMode("liquidity.pool_tol_atr", "number", same(0.02, 0.15)),
+  ...perMode("liquidity.hvn_pctl", "number", same(0.8, 0.95)),
+  ...perMode("liquidity.profile_window_min", "integer", [[120, 480], [480, 2880], [2880, 14400], [480, 2880]]),
+  "positioning.score_floor": { kind: "number", min: 0.4, max: 0.5 },
+  "positioning.score_window": { kind: "integer", min: 40, max: 200 },
+  "liquidity.score_floor": { kind: "number", min: 0.4, max: 0.5 },
+  "liquidity.score_window": { kind: "integer", min: 50, max: 300 }
+});
+
 export const DOCTRINE_BOUNDS = Object.freeze({
   "decision.trading_mode": { kind: "text", in: ["scalp", "intraday", "swing"] },
-  "decision.quorum_min": { kind: "number", min: 0.45, max: 0.7 },
-  "decision.lean": { kind: "number", min: 0.05, max: 0.3 },
-  "decision.min_rrr": { kind: "number", min: 1, max: 3 },
   "decision.min_confidence": { kind: "number", min: 0.3, max: 0.7 },
+  // The Decision Engine's thresholds per trading mode (xauusd, owner 2026-11-19: "mau"), today's single bounds each. The
+  // single facts (decision.quorum_min, lean, min_rrr: the mode in force) are information now, unbounded as on the
+  // platform, so the council amends these only under the per-mode names.
+  "decision.quorum_min_scalp": { kind: "number", min: 0.45, max: 0.7 },
+  "decision.quorum_min_intraday": { kind: "number", min: 0.45, max: 0.7 },
+  "decision.quorum_min_swing": { kind: "number", min: 0.45, max: 0.7 },
+  "decision.quorum_min_range": { kind: "number", min: 0.45, max: 0.7 },
+  "decision.lean_scalp": { kind: "number", min: 0.05, max: 0.3 },
+  "decision.lean_intraday": { kind: "number", min: 0.05, max: 0.3 },
+  "decision.lean_swing": { kind: "number", min: 0.05, max: 0.3 },
+  "decision.lean_range": { kind: "number", min: 0.05, max: 0.3 },
+  "decision.min_rrr_intraday": { kind: "number", min: 1, max: 3 },
+  "decision.min_rrr_swing": { kind: "number", min: 1, max: 3 },
+  "decision.min_rrr_range": { kind: "number", min: 1, max: 3 },
+  // The room guardrail in 1H average ranges, one fact per trading mode so a mode switch alone is no drift (xauusd
+  // src/room-tuning.mjs, owner 2026-11-19: bounds 0.5 to 1.5).
+  "decision.room_min_atr_scalp": { kind: "number", min: 0.5, max: 1.5 },
+  "decision.room_min_atr_intraday": { kind: "number", min: 0.5, max: 1.5 },
+  "decision.room_min_atr_swing": { kind: "number", min: 0.5, max: 1.5 },
+  "decision.room_min_atr_range": { kind: "number", min: 0.5, max: 1.5 },
   "decision.witness_weights": { kind: "weights", max_each: 0.3 },
   "rooms.quorum_share_default": { kind: "number", min: 0.5, max: 0.6 },
   "room.m15_unverified_confidence_cap": { kind: "number", min: 0.3, max: 0.5 },
@@ -50,9 +105,25 @@ export const DOCTRINE_BOUNDS = Object.freeze({
   "calendar.blackout_after_min": { kind: "integer", min: 15, max: 120 },
   "omega.max_signal_age_min": { kind: "number", min: 5, max: 15 },
   "omega.max_spread_points": { kind: "integer", min: 20, max: 100 },
-  "omega.max_positions": { kind: "integer", min: 1, max: 3 },
-  "omega.max_daily_loss_pct": { kind: "number", min: 1, max: 5 },
-  "omega.risk_pct": { kind: "number", min: 0.1, max: 2 }
+  // Omega's risk per account profile (platform ADR-0020 Amendment 10, canonical main e3bb6538e017; owner 2026-11-21:
+  // "Ya, Custom = Aggressive"). The single omega.risk_pct, omega.max_daily_loss_pct and omega.max_positions (the
+  // settings in force) are information now, unbounded as on the platform, so the council amends risk only under the
+  // per-profile names. omega.profile and omega.effective_* are derived facts, never amended.
+  "omega.risk_pct_safe": { kind: "number", min: 0.1, max: 2 },
+  "omega.risk_pct_conservative": { kind: "number", min: 0.1, max: 5 },
+  "omega.risk_pct_aggressive": { kind: "number", min: 0.1, max: 10 },
+  "omega.risk_pct_custom": { kind: "number", min: 0.1, max: 10 },
+  "omega.max_daily_loss_pct_safe": { kind: "number", min: 0.1, max: 3 },
+  "omega.max_daily_loss_pct_conservative": { kind: "number", min: 0.1, max: 6 },
+  "omega.max_daily_loss_pct_aggressive": { kind: "number", min: 0.1, max: 10 },
+  "omega.max_daily_loss_pct_custom": { kind: "number", min: 0.1, max: 10 },
+  "omega.max_positions_safe": { kind: "integer", min: 1, max: 1 },
+  "omega.max_positions_conservative": { kind: "integer", min: 1, max: 2 },
+  "omega.max_positions_aggressive": { kind: "integer", min: 1, max: 3 },
+  "omega.max_positions_custom": { kind: "integer", min: 1, max: 3 },
+  // The Positioning & Liquidity analyst's knobs (xauusd docs/RFC_POSITIONING_LIQUIDITY.md §8, owner breakglass
+  // 2026-11-20): 44 per-mode facts and 4 score facts, the platform's bounds (canonical main a879288).
+  ...LENS_BOUNDS
 });
 
 const WITNESS_WORD = Object.freeze({
@@ -259,7 +330,8 @@ export const DOCTRINE_SCHEMA_SQL = Object.freeze([
     detail TEXT,
     created_at TEXT NOT NULL
   )`,
-  "CREATE INDEX IF NOT EXISTS idx_council_proposals_rule ON council_proposals(rule_id, created_at)"
+  "CREATE INDEX IF NOT EXISTS idx_council_proposals_rule ON council_proposals(rule_id, created_at)",
+  "CREATE TABLE IF NOT EXISTS aether_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
 ]);
 let ready = false;
 export function resetDoctrineSchemaCacheForTests() { ready = false; }
@@ -328,7 +400,56 @@ export async function syncAmendments(env, { now = Date.now() } = {}) {
       .bind(a.amendment_id, a.rule, a.action, JSON.stringify(a.values ?? {}), JSON.stringify(a.previous ?? {}), String(a.canon ?? ""), String(a.session ?? ""), a.executed_by ?? null, a.executed_at, new Date(now).toISOString()).run();
     if (Number(res?.meta?.changes)) applied += 1;
   }
-  return { status: "ok", applied };
+  // A proposal Cerebrum executed is marked executed (it stayed pending_owner after the owner's click,
+  // since the propose answer is the only status the council saw; production 2026-11-19 to 11-22).
+  const marked = await markExecutedProposals(db);
+  return { status: "ok", applied, marked };
+}
+
+/** Every council proposal whose amendment Cerebrum executed (doctrine_applied) reads executed. Idempotent. */
+export async function markExecutedProposals(db) {
+  try {
+    const r = await db.prepare("UPDATE council_proposals SET status = 'executed' WHERE status <> 'executed' AND proposal_id IN (SELECT amendment_id FROM doctrine_applied)").run();
+    return Number(r?.meta?.changes) || 0;
+  } catch { return 0; }
+}
+
+/**
+ * The council's own proposals still open within the cooldown window (no final status stored, created within
+ * PROPOSAL_COOLDOWN_MS: nothing older can hold the cooldown) are read back through consensus.status, STATUS_BATCH_MAX
+ * ids a call: one that reads rejected or expired is stored so (a final row is never overwritten). Both keep the 7-day
+ * cooldown, as a pending one does; only executed lifts it, and that comes from markExecutedProposals. not_found (not
+ * the council's, or unknown), executed and pending_owner leave the row as it is (fail closed). A pending_owner whose
+ * expires_at is past still counts as pending until the platform's sweep makes it read expired. A denial (the
+ * capability not granted yet) waits STATUS_DENIAL_BACKOFF_MS and changes nothing. Never throws.
+ */
+export async function syncProposalStatuses(env, db, { now = Date.now() } = {}) {
+  try {
+    const until = Number((await db.prepare("SELECT value FROM aether_meta WHERE key = 'council_status_backoff_until'").first())?.value) || 0;
+    if (until > now) return { status: "backoff", until: new Date(until).toISOString() };
+    const open = ((await db.prepare("SELECT DISTINCT proposal_id FROM council_proposals WHERE proposal_id LIKE 'cns_%' AND status NOT IN ('executed', 'rejected', 'expired', 'failed', 'unavailable', 'denied') AND created_at >= ? ORDER BY proposal_id").bind(new Date(now - PROPOSAL_COOLDOWN_MS).toISOString()).all()).results || [])
+      .map((r) => r.proposal_id).filter((id) => typeof id === "string" && PROPOSAL_ID.test(id));
+    let read = 0, updated = 0;
+    for (let i = 0; i < open.length; i += STATUS_BATCH_MAX) {
+      const ids = open.slice(i, i + STATUS_BATCH_MAX);
+      const r = await syscall(env, "consensus.status", { proposal_ids: ids });
+      if (r?.outcome === "denied") {
+        await db.prepare("INSERT INTO aether_meta (key, value, updated_at) VALUES ('council_status_backoff_until', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(String(now + STATUS_DENIAL_BACKOFF_MS), new Date(now).toISOString()).run();
+        return { status: "denied", reason: String(r.reason ?? "").slice(0, 160), read, updated };
+      }
+      if (r?.outcome !== "succeeded") return { status: r?.outcome ?? "failed", reason: String(r?.reason ?? "").slice(0, 160), read, updated };
+      for (const p of Array.isArray(r.result?.proposals) ? r.result.proposals : []) {
+        if (!ids.includes(p?.proposal_id)) continue;
+        read += 1;
+        if (!STATUS_FINAL.includes(p.status)) continue;
+        const res = await db.prepare("UPDATE council_proposals SET status = ? WHERE proposal_id = ? AND status NOT IN ('executed', 'rejected', 'expired')").bind(p.status, p.proposal_id).run();
+        updated += Number(res?.meta?.changes) || 0;
+      }
+    }
+    return { status: "ok", open: open.length, read, updated };
+  } catch (e) {
+    return { status: "failed", reason: String(e?.message ?? e).slice(0, 160) };
+  }
 }
 
 export const sessionIdAt = (now) => "kc_" + new Date(now).toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-").toLowerCase();
@@ -341,6 +462,8 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
   const mode = ["off", "observe", "propose"].includes(String(env.KNOWLEDGE_COUNCIL ?? "").trim()) ? String(env.KNOWLEDGE_COUNCIL).trim() : "propose";
   if (mode === "off") return { status: "off" };
   const sync = await syncAmendments(env, { now });
+  // The owner's decisions on the council's own proposals (consensus.status), before the cooldown reads them.
+  const statuses = await syncProposalStatuses(env, db, { now });
   const session = sessionIdAt(now);
   const rules = effectiveDoctrine(await appliedAmendments(db)).map((r) => ({ ...r, template: (CANON.doctrine.rules.find((c) => c.id === r.id) || {}).template, anchors: r.anchors.map((a) => ({ fact: a.fact, format: a.format, value: a.value })) }));
   const { latest, previous } = await factsPair(db, { now });
@@ -351,7 +474,12 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
     for (const item of review.filter((x) => x.status === "propose")) {
       if (proposals.filter((p) => p.status !== "skipped").length >= MAX_PROPOSALS_PER_SESSION) break;
       const valuesJson = JSON.stringify(item.proposal.params.values);
-      const recent = await db.prepare("SELECT status FROM council_proposals WHERE rule_id = ? AND values_json = ? AND created_at >= ? AND status NOT IN ('failed', 'unavailable') ORDER BY created_at DESC LIMIT 1")
+      // The same values for the same rule are not asked again within 7 days while the owner has not decided
+      // or has refused. An executed one does not count: its drift is back only because the canon moved on
+      // and dropped it (a canon change drops every live amendment), so it is proposed again. A rejected or an
+      // expired one (read through consensus.status) keeps the cooldown: an ignored proposal re-asked every ~48 h
+      // would ask the owner about 15 times a month per rule (owner: "tidak perlu notif cerebrum terlalu sering").
+      const recent = await db.prepare("SELECT status FROM council_proposals WHERE rule_id = ? AND values_json = ? AND created_at >= ? AND status NOT IN ('failed', 'unavailable', 'executed') ORDER BY created_at DESC LIMIT 1")
         .bind(item.rule, valuesJson, new Date(now - PROPOSAL_COOLDOWN_MS).toISOString()).first();
       if (recent) { proposals.push({ rule: item.rule, action: item.action, status: "skipped", detail: `proposed within 7 days (${recent.status})` }); continue; }
       const r = await syscall(env, "consensus.propose", item.proposal);
@@ -377,7 +505,7 @@ export async function runCouncil(env, { now = Date.now() } = {}) {
     ai_status: "deterministic",
     body: { advisory: "Doctrine review; Cerebrum decides and executes every amendment.", session, mode, facts_at: latest?.received_at ?? null, open: open.slice(0, 20), proposals }
   });
-  return { status: "ok", session, mode, facts: Boolean(latest), reviewed: slim.length, open: open.length, proposals, sync, applied, report: report?.outcome ?? null };
+  return { status: "ok", session, mode, facts: Boolean(latest), reviewed: slim.length, open: open.length, proposals, sync, statuses, applied, report: report?.outcome ?? null };
 }
 
 /** The doctrine for the overview: in force, retired, the last session, the facts' freshness. Never throws. */
@@ -410,9 +538,13 @@ export async function doctrineView(env, { now = Date.now() } = {}) {
 // a value Aether invents. The xauusd Worker pulls this pack hourly and applies it only when the owner's
 // switch OMEGA_POLICY_AUTO is on, within its own hard bounds.
 export const OMEGA_POLICY_VERSION = "cryptophys.omega-policy.v1";
+// Since ADR-0020 Amendment 10 the risk is per profile (`risk_pct_<profile>` and so on): xauusd's policy applies the
+// single settings only (risk_pct, max_positions, max_daily_loss_pct), so the pack no longer carries them and the
+// per-profile values are information for it until xauusd reads them.
+const PROFILES = ["safe", "conservative", "aggressive", "custom"];
 const OMEGA_POLICY_FACTS = Object.freeze({
-  "omega.risk_pct": "risk_pct", "omega.max_positions": "max_positions", "omega.max_daily_loss_pct": "max_daily_loss_pct",
-  "omega.max_spread_points": "max_spread_points", "omega.max_signal_age_min": "max_signal_age_min"
+  "omega.max_spread_points": "max_spread_points", "omega.max_signal_age_min": "max_signal_age_min",
+  ...Object.fromEntries(PROFILES.flatMap((p) => ["risk_pct", "max_daily_loss_pct", "max_positions"].map((k) => [`omega.${k}_${p}`, `${k}_${p}`])))
 });
 
 /** Pure: Omega's policy from the doctrine in force; each value within the fact's bounds, else left out. */
@@ -436,4 +568,32 @@ export async function omegaPolicy(env) {
   try { applied = db ? await appliedAmendments(db) : []; } catch { applied = []; }
   const { values, amended } = omegaPolicyOf(effectiveDoctrine(applied));
   return { version: OMEGA_POLICY_VERSION, doctrine_sha: await effectiveSha(db).catch(() => CANON.content_sha256), values, amended, advisory: "Applied by Omega only when its owner's switch is on, within its own hard bounds." };
+}
+
+// ---------------------------------------------------------------- the Positioning & Liquidity analyst's knobs
+// xauusd docs/RFC_POSITIONING_LIQUIDITY.md §7.1: KnowledgeIngress.lensPolicy(), read by the hourly pull beside
+// omegaPolicy(). The values are the doctrine in force (the canon rule lens_positioning_liquidity plus the amendments
+// Cerebrum executed), each inside its hard bound, else left out; xauusd clamps again and falls back to its anchor.
+export const LENS_POLICY_VERSION = "cryptophys.lens-policy.v1";
+
+/** Pure: the lens knobs from the doctrine in force, by their flat fact names; each within its bound, else left out. */
+export function lensPolicyOf(rules) {
+  const values = {}, amended = {};
+  for (const r of rules || []) {
+    for (const a of r.anchors || []) {
+      if (!Object.hasOwn(LENS_BOUNDS, a.fact) || boundProblem(a.fact, a.value)) continue;
+      values[a.fact] = a.value;
+      if (r.amended && !sameValue(a.value, a.canon_value)) amended[a.fact] = { from: a.canon_value, amendment_id: r.amended.amendment_id, executed_at: r.amended.executed_at };
+    }
+  }
+  return { values, amended };
+}
+
+/** The pack xauusd pulls for the lens knobs: the values in force, the doctrine's sha and the amendments behind them. */
+export async function lensPolicy(env) {
+  const db = env?.AETHER_DB;
+  let applied = [];
+  try { applied = db ? await appliedAmendments(db) : []; } catch { applied = []; }
+  const { values, amended } = lensPolicyOf(effectiveDoctrine(applied));
+  return { version: LENS_POLICY_VERSION, doctrine_sha: await effectiveSha(db).catch(() => CANON.content_sha256), values, amended, advisory: "Read by the Positioning & Liquidity analyst within its own hard bounds; the owner's switches turn a lens off." };
 }

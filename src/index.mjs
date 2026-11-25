@@ -12,7 +12,8 @@
 //     weighting item activates the H1 quorum weighting in xauusd, owner decision 2026-11-09),
 //     ingestWeightingReport (the H1 quorum replay, src/weighting.mjs), ingestExecutionReport (the Signal
 //     Ledger's plan and Omega policy per trading mode, src/execution.mjs), ingestModelReport (xauusd's
-//     self-trained baseline model, src/model.mjs)
+//     self-trained baseline model, src/model.mjs), lensPolicy and ingestLensReport (the Positioning & Liquidity
+//     analyst's knobs from the doctrine in force and its daily lens report, src/doctrine.mjs, src/lens.mjs)
 //   cron :52 every hour (phase A4): canon sync into aether-canon (once per canon version), card
 //   embedding into aether-market, the review status of open knowledge proposals; at 01:52 UTC the
 //   guardian and auditor digest to the kernel; at 02:52 UTC the curator and calibrator propose (A6), and
@@ -28,11 +29,13 @@ import { syncCanon, embedPendingCards, indexStatus } from "./indexes.mjs";
 import { runDigest } from "./guardian.mjs";
 import { usageToday } from "./usage.mjs";
 import { runCuration, curationCarried, syncReviews, learnedPack, knowledgeCounts } from "./knowledge.mjs";
+import { runCorrections } from "./corrections.mjs";
 import { storeWeightingReport, weightingReports } from "./weighting.mjs";
 import { storeExecutionReport } from "./execution.mjs";
 import { storeModelReport } from "./model.mjs";
-import { aetherOverview, aetherSync } from "./reader.mjs";
-import { storeFacts, syncAmendments, runCouncil, COUNCIL_HOUR_UTC, omegaPolicy } from "./doctrine.mjs";
+import { aetherOverview, aetherSync, historyList } from "./reader.mjs";
+import { storeFacts, syncAmendments, runCouncil, COUNCIL_HOUR_UTC, omegaPolicy, lensPolicy } from "./doctrine.mjs";
+import { storeLensReport } from "./lens.mjs";
 
 const json = (body, status = 200) => new Response(JSON.stringify(body, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const canonInfo = () => ({ version: CANON.version, content_sha256: CANON.content_sha256, files: CANON.files, kb_version: CANON.indicator.kb_version, kb_content_sha256: CANON.indicator.kb_content_sha256 });
@@ -53,6 +56,10 @@ export class KnowledgeIngress extends WorkerEntrypoint {
   async ingestExecutionReport(report) { return storeExecutionReport(this.env.AETHER_DB, report); }
   // xauusd's self-trained baseline model (owner 2026-11-13): its scores and features, never a price.
   async ingestModelReport(report) { return storeModelReport(this.env.AETHER_DB, report); }
+  // The Positioning & Liquidity analyst (xauusd, owner breakglass 2026-11-20): its knobs from the doctrine in force,
+  // pulled hourly beside omegaPolicy, and its daily lens report (weights, scores, floors; never a price).
+  async lensPolicy() { return lensPolicy(this.env); }
+  async ingestLensReport(report) { return storeLensReport(this.env.AETHER_DB, report); }
 }
 
 /**
@@ -93,7 +100,7 @@ export default {
       let weighting = null;
       try {
         const all = env.AETHER_DB ? await weightingReports(env.AETHER_DB) : [];
-        weighting = all.length ? Object.fromEntries(all.map((w) => [w.timeframe, { received_at: w.received_at, mode: w.report.mode ?? null, active: w.report.active?.id ?? null, rooms: w.report.rooms ?? 0, regimes: w.report.regimes ?? null, better: (w.report.candidates || []).filter((c) => String(c.verdict).startsWith("better_than_active")).map((c) => c.id), last_change: (w.report.history || []).filter((h) => h.kind === "activated" || h.kind === "rolled_back").at(-1) ?? null }])) : null;
+        weighting = all.length ? Object.fromEntries(all.map((w) => [w.timeframe, { received_at: w.received_at, mode: w.report.mode ?? null, active: w.report.active?.id ?? null, rooms: w.report.rooms ?? 0, regimes: w.report.regimes ?? null, better: (Array.isArray(w.report?.candidates) ? w.report.candidates : []).filter((c) => String(c.verdict).startsWith("better_than_active")).map((c) => c.id), last_change: historyList(w.report?.history).filter((h) => h.kind === "activated" || h.kind === "rolled_back").at(-1) ?? null }])) : null;
       } catch { weighting = { error: "unavailable" }; }
       return json({ service: "cryptophys-aether", status: "ok", phase: env.AETHER_PHASE ?? "A6", canon: { version: CANON.version, content_sha256: CANON.content_sha256 }, cards, indexes, ai, knowledge, weighting });
     }
@@ -119,6 +126,8 @@ export default {
       await step("knowledge_reviews", () => syncReviews(env, { now }));
       // Owner 2026-11-11: the doctrine amendments Cerebrum executed, every hour; the council once a day.
       await step("doctrine_amendments", () => syncAmendments(env, { now }));
+      // HAIC H3g: the owner's Nexus corrections from the platform's ledger, every hour (src/corrections.mjs).
+      await step("corrections", () => runCorrections(env, { now }));
       if (new Date(now).getUTCHours() === 1) await step("digest", () => runDigest(env, { now }));
       if (new Date(now).getUTCHours() === 2) await step("curation", () => runCuration(env, { now, daily: true }));
       // Proposals the kernel's hourly quota left over are carried to the next hours (src/knowledge.mjs).

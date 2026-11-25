@@ -11,6 +11,7 @@ import { knowledgeCounts, curationProgressOf } from "./knowledge.mjs";
 import { weightingReports } from "./weighting.mjs";
 import { latestExecutionReport, executionSummary } from "./execution.mjs";
 import { latestModelReport, modelSummary } from "./model.mjs";
+import { latestLensReport } from "./lens.mjs";
 import { complianceFindings, COMPLIANCE_WARN_PER_100 } from "./guardian.mjs";
 import { doctrineView, effectiveSha } from "./doctrine.mjs";
 
@@ -31,8 +32,8 @@ export const WEIGHTING_DISCOVERY_MIN = 200;
  * the rooms on the active weighting (the rollback check needs 100).
  */
 export function weightingProgress(timeframe, report, receivedAt) {
-  const r = report || {};
-  const cands = r.candidates || [];
+  const r = report && typeof report === "object" ? report : {};
+  const cands = list(r.candidates).filter((c) => c && typeof c === "object");
   const paired = (c) => Number(c.discovery?.bars ?? 0) + Number(c.holdout?.bars ?? 0);
   const best = [...cands].sort((a, b) => paired(b) - paired(a))[0] || null;
   const verdicts = {};
@@ -46,10 +47,29 @@ export function weightingProgress(timeframe, report, receivedAt) {
   };
 }
 
+/**
+ * Pure: a report's history as one list, oldest first. Most timeframes send an array; the room guardrail
+ * (timeframe "room", xauusd src/room-tuning.mjs) sends one array per trading mode ({ scalp: [...], ... }),
+ * whose entries get their mode. Anything else is an empty list (2026-11-19: an object here threw in
+ * .slice and took the whole overview down).
+ */
+export function historyList(history) {
+  if (Array.isArray(history)) return history.filter((h) => h && typeof h === "object");
+  if (!history || typeof history !== "object") return [];
+  const out = [];
+  for (const [mode, list] of Object.entries(history)) {
+    if (!Array.isArray(list)) continue;
+    for (const h of list) if (h && typeof h === "object") out.push({ mode, ...h });
+  }
+  const t = (h) => { const v = Date.parse(h.at ?? h.activated_at ?? ""); return Number.isFinite(v) ? v : 0; };
+  return out.sort((a, b) => t(a) - t(b));
+}
+const list = (v) => (Array.isArray(v) ? v : []);
+
 /** Pure: a weighting report reduced to what the page shows. */
 export function weightingSummary(timeframe, report, receivedAt) {
-  const r = report || {};
-  const candidates = (r.candidates || []).map((c) => ({
+  const r = report && typeof report === "object" ? report : {};
+  const candidates = list(r.candidates).filter((c) => c && typeof c === "object").map((c) => ({
     id: c.id, changed: c.changed ?? null, change: c.change ?? null, verdict: c.verdict ?? null,
     ...(timeframe === "engine" ? { params: c.params ?? null, same_rooms: c.same_rooms ?? null, differing_decisions: c.differing_decisions ?? null } : {}),
     discovery: c.discovery ? { bars: c.discovery.bars ?? null, accuracy: c.discovery.accuracy ?? null, control_accuracy: c.discovery.control_accuracy ?? null, p_holm: c.discovery.p_holm ?? null } : null,
@@ -64,10 +84,13 @@ export function weightingSummary(timeframe, report, receivedAt) {
     // The Decision Engine's witness weights (timeframe "engine", owner 2026-11-11): the replayed decisions, how
     // often the replayed quorum check matches the recorded one, and the control's accuracy.
     ...(timeframe === "engine" ? { kind: "witness_weights", replay_fidelity: r.replay_fidelity ?? null, control: r.control ?? null } : {}),
-    agents: (r.agents || []).map((a) => ({ agent: a.agent, weight: a.weight ?? null, accuracy: a.accuracy ?? null, calibration: a.calibration ?? null, decisive: a.decisive ?? null })),
+    // The room guardrail per trading mode (timeframe "room", owner 2026-11-19): each mode's room, decisions,
+    // replay fidelity and accuracy, and the doctrine bounds.
+    ...(timeframe === "room" ? { kind: "room_guardrail", bounds: r.bounds ?? null, modes: r.modes && typeof r.modes === "object" ? r.modes : null } : {}),
+    agents: list(r.agents).map((a) => ({ agent: a.agent, weight: a.weight ?? null, accuracy: a.accuracy ?? null, calibration: a.calibration ?? null, decisive: a.decisive ?? null })),
     candidates: candidates.slice(0, 16),
     reverse: r.reverse ? { previous_id: r.reverse.previous_id ?? null, since: r.reverse.since ?? null, rooms: r.reverse.rooms ?? 0, p_value: r.reverse.p_value ?? null, previous_accuracy: r.reverse.previous_accuracy ?? null, active_accuracy: r.reverse.active_accuracy ?? null } : null,
-    history: (r.history || []).slice(-12).reverse()
+    history: historyList(r.history).slice(-12).reverse()
   };
 }
 
@@ -156,7 +179,10 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
     return { item_id: r.item_id, version: r.version, kind: r.kind, agent: r.agent_id, status: r.status, text: it.text ?? null, situation: it.situation ?? null, params: it.params ?? null, evidence: it.evidence ?? null, detail: parse(r.detail) ?? r.detail ?? null, created_at: r.created_at, updated_at: r.updated_at };
   }), []) : [];
   const reports = db ? await safe(() => weightingReports(db), []) : [];
-  const weighting = reports.map((w) => weightingSummary(w.timeframe, w.report, w.received_at));
+  // Each report on its own (2026-11-19): one report the reader cannot read marks that timeframe unavailable
+  // and every other panel still serves.
+  const each = (fn) => reports.map((w) => { try { return fn(w.timeframe, w.report, w.received_at); } catch (e) { return { timeframe: w.timeframe, received_at: w.received_at ?? null, error: "unavailable", detail: String(e?.message ?? e).slice(0, 120) }; } });
+  const weighting = each(weightingSummary);
   const roles = CANON.roles?.agents || [];
   const doctrine = await safe(() => doctrineView(env, { now }), null);
   return {
@@ -181,11 +207,13 @@ export async function aetherOverview(env, { now = Date.now() } = {}) {
     execution: db ? await safe(async () => executionSummary(await latestExecutionReport(db)), null) : null,
     // xauusd's self-trained baseline model (owner 2026-11-13): what it learned and how it did.
     model: db ? await safe(async () => modelSummary(await latestModelReport(db)), null) : null,
+    // Positioning & Liquidity analyst report: latest accepted report and receipt time.
+    lens: db ? await safe(() => latestLensReport(db), null) : null,
     doctrine,
     progress: {
-      curation: db ? await curationProgressOf(db, { now }) : null,
-      weighting: reports.map((w) => weightingProgress(w.timeframe, w.report, w.received_at))
+      curation: db ? await safe(() => curationProgressOf(db, { now }), null) : null,
+      weighting: each(weightingProgress)
     },
-    sync: await aetherSync(env, { now })
+    sync: await safe(() => aetherSync(env, { now }), null)
   };
 }

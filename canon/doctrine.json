@@ -6,12 +6,12 @@
     {
       "id": "execution_boundary",
       "class": "constitutional",
-      "rule": "No Worker places an order or can read a broker credential. Trades happen only on the owner's own MetaTrader 5 terminal: the owner's EA executes the decision it reads from the signal API, or the Omega bridge executes what Omega plans and sizes from the owner's risk setting, at most 2% of equity per trade. Omega plans nothing unless both its switch and its page toggle are on, a real account also needs the typed LIVE arm, a kill closes the positions, and the EA and the Omega executor never run on the same account. Aether, the kernel and learned knowledge stay advisory.",
+      "rule": "No Worker places an order or can read a broker credential. Trades happen only on the owner's own MetaTrader 5 terminal: the owner's EA executes the decision it reads from the signal API, or the Omega bridge executes what Omega plans and sizes from the owner's risk setting, at most 10% of equity per trade. Omega plans nothing unless both its switch and its page toggle are on, a real account also needs the typed LIVE arm, a kill closes the positions, and the EA and the Omega executor never run on the same account. Aether, the kernel and learned knowledge stay advisory.",
       "template": "No Worker places an order or can read a broker credential. Trades happen only on the owner's own MetaTrader 5 terminal: the owner's EA executes the decision it reads from the signal API, or the Omega bridge executes what Omega plans and sizes from the owner's risk setting, at most {omega.risk_pct_max}% of equity per trade. Omega plans nothing unless both its switch and its page toggle are on, a real account also needs the typed LIVE arm, a kill closes the positions, and the EA and the Omega executor never run on the same account. Aether, the kernel and learned knowledge stay advisory.",
       "anchors": [
         {
           "fact": "omega.risk_pct_max",
-          "value": 2,
+          "value": 10,
           "format": "num"
         },
         {
@@ -22,7 +22,7 @@
       ],
       "source": "xauusd AGENTS.md rule 8; docs/SSOT.md \"MT5 Expert Advisor\" and \"Omega broker engine\"; owner decisions 2026-11-09 (Langsung siap live, Omega memegang akses broker, Bridge di host ini, Mati sampai Anda aktifkan)",
       "since": "2026-10",
-      "updated": "2026-11-11",
+      "updated": "2026-11-22",
       "supersedes": [
         "advisory_only"
       ]
@@ -165,26 +165,61 @@
     {
       "id": "engine_thresholds",
       "class": "operational",
-      "rule": "In the intraday mode the Decision Engine's BUY or SELL needs more than 50% of the witnesses' weight on its side, or a lean of at least 0.15 with more weight than the other side; no veto; a plan from the key levels paying at least 1.5R to its target; room to move, with the nearest key zones below and above price at least one 1H average range apart; and a confidence of at least 0.4. The trading mode (scalp, intraday or swing) sets these thresholds. In the scalp mode the target is the nearest key level ahead, with no reward-to-risk minimum.",
-      "template": "In the {decision.trading_mode} mode the Decision Engine's BUY or SELL needs more than {decision.quorum_min} of the witnesses' weight on its side, or a lean of at least {decision.lean} with more weight than the other side; no veto; a plan from the key levels paying at least {decision.min_rrr}R to its target; room to move, with the nearest key zones below and above price at least one 1H average range apart; and a confidence of at least {decision.min_confidence}. The trading mode (scalp, intraday or swing) sets these thresholds. In the scalp mode the target is the nearest key level ahead, with no reward-to-risk minimum.",
+      "rule": "The Decision Engine's BUY or SELL needs, in the trading mode in force: more than the mode's quorum of the witnesses' weight on its side (scalp 45%, intraday 50%, swing 60%, range 50%), or a lean of at least the mode's lean (scalp 0.1, intraday 0.15, swing 0.2, range 0.15) with more weight than the other side; no veto; a plan from the key levels paying at least the mode's reward to its target (intraday 1.5R, swing 2R, range 1.5R; in the scalp mode the target is the nearest key level ahead, with no reward-to-risk minimum); room to move, with the nearest key zones below and above price at least the trading mode's room apart, in 1H average ranges (scalp 1, intraday 1, swing 1, range 1; the learning protocol moves each between 0.5 and 1.5); and a confidence of at least 0.4.",
+      "template": "The Decision Engine's BUY or SELL needs, in the trading mode in force: more than the mode's quorum of the witnesses' weight on its side (scalp {decision.quorum_min_scalp}, intraday {decision.quorum_min_intraday}, swing {decision.quorum_min_swing}, range {decision.quorum_min_range}), or a lean of at least the mode's lean (scalp {decision.lean_scalp}, intraday {decision.lean_intraday}, swing {decision.lean_swing}, range {decision.lean_range}) with more weight than the other side; no veto; a plan from the key levels paying at least the mode's reward to its target (intraday {decision.min_rrr_intraday}R, swing {decision.min_rrr_swing}R, range {decision.min_rrr_range}R; in the scalp mode the target is the nearest key level ahead, with no reward-to-risk minimum); room to move, with the nearest key zones below and above price at least the trading mode's room apart, in 1H average ranges (scalp {decision.room_min_atr_scalp}, intraday {decision.room_min_atr_intraday}, swing {decision.room_min_atr_swing}, range {decision.room_min_atr_range}; the learning protocol moves each between 0.5 and 1.5); and a confidence of at least {decision.min_confidence}.",
       "anchors": [
         {
-          "fact": "decision.trading_mode",
-          "value": "intraday",
-          "format": "text"
+          "fact": "decision.quorum_min_scalp",
+          "value": 0.45,
+          "format": "pct"
         },
         {
-          "fact": "decision.quorum_min",
+          "fact": "decision.quorum_min_intraday",
           "value": 0.5,
           "format": "pct"
         },
         {
-          "fact": "decision.lean",
+          "fact": "decision.quorum_min_swing",
+          "value": 0.6,
+          "format": "pct"
+        },
+        {
+          "fact": "decision.quorum_min_range",
+          "value": 0.5,
+          "format": "pct"
+        },
+        {
+          "fact": "decision.lean_scalp",
+          "value": 0.1,
+          "format": "num"
+        },
+        {
+          "fact": "decision.lean_intraday",
           "value": 0.15,
           "format": "num"
         },
         {
-          "fact": "decision.min_rrr",
+          "fact": "decision.lean_swing",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "decision.lean_range",
+          "value": 0.15,
+          "format": "num"
+        },
+        {
+          "fact": "decision.min_rrr_intraday",
+          "value": 1.5,
+          "format": "num"
+        },
+        {
+          "fact": "decision.min_rrr_swing",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "decision.min_rrr_range",
           "value": 1.5,
           "format": "num"
         },
@@ -192,11 +227,31 @@
           "fact": "decision.min_confidence",
           "value": 0.4,
           "format": "num"
+        },
+        {
+          "fact": "decision.room_min_atr_scalp",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "decision.room_min_atr_intraday",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "decision.room_min_atr_swing",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "decision.room_min_atr_range",
+          "value": 1,
+          "format": "num"
         }
       ],
-      "source": "xauusd src/decision-engine.mjs guardrailsFor and decide; owner decision 2026-11-10 (trading modes); 2026-11-13: room to move (the squeeze guardrail, owner)",
+      "source": "xauusd src/decision-engine.mjs guardrailsFor and decide; owner decision 2026-11-10 (trading modes); 2026-11-13: room to move (the squeeze guardrail, owner); 2026-11-19: the room per trading mode, moved by the learning protocol inside 0.5 to 1.5 times the 1H average range (xauusd src/room-tuning.mjs; owner: \"guardrail room biarkan protocol learning dan knowledge yang melakukan adjustment secara dinamis\", then \"sesuai rekomendasimu\"); 2026-11-19: the quorum, the lean and the reward per trading mode, one fact each, so a mode switch alone is no drift (owner, relayed: \"mau\"); 2026-11-19: the mode in force is information, not an anchor (16 mode switches in 9 days, scalp in 92% of decisions; owner: \"ya\")",
       "since": "2026-11-11",
-      "updated": "2026-11-13"
+      "updated": "2026-11-19"
     },
     {
       "id": "confirmation_required",
@@ -340,8 +395,8 @@
     {
       "id": "omega_execution_gates",
       "class": "operational",
-      "rule": "Omega opens at most once per signal, before it expires and within 10 minutes of the decision, outside the event blackout and the daily rollover quarantine (21:55-22:15 UTC), at a spread of at most 60 points, with fewer than 1 open positions and above the daily loss limit of 2% of the day's starting balance. It risks 0.5% of equity at the stop and keeps the plan's distances from the broker's own price; a position against the signal is closed. A new entry's lot is capped to what the day can still lose (the equity above the daily loss floor less the open positions' loss at their stops), and a second position on a side waits until every position on that side is protected, its stop at or beyond its open price. Omega alone moves an open position's stop and target, from the key levels and the latest decision's quorum power: past a key level the stop locks a small profit and steps behind the passed levels (further back with a strong power, tighter with a weak one), near the target a strong power moves it to the next key level, and a winner is closed when the power turns strongly against it; the executor's own break-even and trailing are off.",
-      "template": "Omega opens at most once per signal, before it expires and within {omega.max_signal_age_min} minutes of the decision, outside the event blackout and the daily rollover quarantine ({omega.rollover_quarantine_utc} UTC), at a spread of at most {omega.max_spread_points} points, with fewer than {omega.max_positions} open positions and above the daily loss limit of {omega.max_daily_loss_pct}% of the day's starting balance. It risks {omega.risk_pct}% of equity at the stop and keeps the plan's distances from the broker's own price; a position against the signal is closed. A new entry's lot is capped to what the day can still lose (the equity above the daily loss floor less the open positions' loss at their stops), and a second position on a side waits until every position on that side is protected, its stop at or beyond its open price. Omega alone moves an open position's stop and target, from the key levels and the latest decision's quorum power: past a key level the stop locks a small profit and steps behind the passed levels (further back with a strong power, tighter with a weak one), near the target a strong power moves it to the next key level, and a winner is closed when the power turns strongly against it; the executor's own break-even and trailing are off.",
+      "rule": "Omega opens at most once per signal, before it expires and within 10 minutes of the decision, outside the event blackout and the daily rollover quarantine (21:55-22:15 UTC), at a spread of at most 60 points, with fewer open positions than the account profile allows (Safe 1, Conservative 2, Aggressive 2, Custom 2) and above the profile's daily loss limit (Safe 3%, Conservative 6%, Aggressive 6%, Custom 6%) of the day's starting balance. It risks the profile's share of equity at the stop (Safe 1%, Conservative 2%, Aggressive 3%, Custom 3%), the smaller of the profile's cap and the setting, and keeps the plan's distances from the broker's own price; a position against the signal is closed. A new entry's lot is capped to what the day can still lose (the equity above the daily loss floor less the open positions' loss at their stops), and a second position on a side waits until every position on that side is protected, its stop at or beyond its open price. Omega alone moves an open position's stop and target, from the key levels and the latest decision's quorum power: past a key level the stop locks a small profit and steps behind the passed levels (further back with a strong power, tighter with a weak one), near the target a strong power moves it to the next key level, and a winner is closed when the power turns strongly against it; the executor's own break-even and trailing are off.",
+      "template": "Omega opens at most once per signal, before it expires and within {omega.max_signal_age_min} minutes of the decision, outside the event blackout and the daily rollover quarantine ({omega.rollover_quarantine_utc} UTC), at a spread of at most {omega.max_spread_points} points, with fewer open positions than the account profile allows (Safe {omega.max_positions_safe}, Conservative {omega.max_positions_conservative}, Aggressive {omega.max_positions_aggressive}, Custom {omega.max_positions_custom}) and above the profile's daily loss limit (Safe {omega.max_daily_loss_pct_safe}%, Conservative {omega.max_daily_loss_pct_conservative}%, Aggressive {omega.max_daily_loss_pct_aggressive}%, Custom {omega.max_daily_loss_pct_custom}%) of the day's starting balance. It risks the profile's share of equity at the stop (Safe {omega.risk_pct_safe}%, Conservative {omega.risk_pct_conservative}%, Aggressive {omega.risk_pct_aggressive}%, Custom {omega.risk_pct_custom}%), the smaller of the profile's cap and the setting, and keeps the plan's distances from the broker's own price; a position against the signal is closed. A new entry's lot is capped to what the day can still lose (the equity above the daily loss floor less the open positions' loss at their stops), and a second position on a side waits until every position on that side is protected, its stop at or beyond its open price. Omega alone moves an open position's stop and target, from the key levels and the latest decision's quorum power: past a key level the stop locks a small profit and steps behind the passed levels (further back with a strong power, tighter with a weak one), near the target a strong power moves it to the next key level, and a winner is closed when the power turns strongly against it; the executor's own break-even and trailing are off.",
       "anchors": [
         {
           "fact": "omega.max_signal_age_min",
@@ -359,24 +414,319 @@
           "format": "num"
         },
         {
-          "fact": "omega.max_positions",
+          "fact": "omega.max_positions_safe",
           "value": 1,
           "format": "num"
         },
         {
-          "fact": "omega.max_daily_loss_pct",
+          "fact": "omega.max_positions_conservative",
           "value": 2,
           "format": "num"
         },
         {
-          "fact": "omega.risk_pct",
-          "value": 0.5,
+          "fact": "omega.max_positions_aggressive",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "omega.max_positions_custom",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "omega.max_daily_loss_pct_safe",
+          "value": 3,
+          "format": "num"
+        },
+        {
+          "fact": "omega.max_daily_loss_pct_conservative",
+          "value": 6,
+          "format": "num"
+        },
+        {
+          "fact": "omega.max_daily_loss_pct_aggressive",
+          "value": 6,
+          "format": "num"
+        },
+        {
+          "fact": "omega.max_daily_loss_pct_custom",
+          "value": 6,
+          "format": "num"
+        },
+        {
+          "fact": "omega.risk_pct_safe",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "omega.risk_pct_conservative",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "omega.risk_pct_aggressive",
+          "value": 3,
+          "format": "num"
+        },
+        {
+          "fact": "omega.risk_pct_custom",
+          "value": 3,
           "format": "num"
         }
       ],
-      "source": "xauusd src/omega-engine.mjs planIntents and OMEGA_DEFAULTS; docs/SSOT.md, Omega broker engine",
+      "source": "xauusd src/omega-engine.mjs planIntents and OMEGA_DEFAULTS, src/account-spec.mjs effectiveLimits; docs/SSOT.md, Omega broker engine; platform ADR-0020 Amendment 10 (per-profile risk, 2026-11-21)",
       "since": "2026-11-09",
-      "updated": "2026-11-11"
+      "updated": "2026-11-22"
+    },
+    {
+      "id": "lens_positioning_liquidity",
+      "class": "operational",
+      "rule": "The Positioning & Liquidity analyst reads two lenses, in the trading mode in force, and never opens, sizes or prices a position. Lens A, positioning from the weekly CFTC report read only after its release, is a Decision Engine witness at a share of the witness weight (scalp 0.02, intraday 0.03, swing 0.05, range 0.03; the other witnesses scale by one less that share); the crowd is stretched when managed money's net sits at or beyond the percentile (scalp 0.9, intraday 0.9, swing 0.9, range 0.9, the low side one less) among the 156 weekly nets before it, and the week's flow counts beyond its standard deviations (scalp 1, intraday 1, swing 1, range 1). Lens B, liquidity from the broker's own one-minute bars against its hour of the week, is weighed in the councils (scalp 0.4, intraday 0.3, swing 0.2, range 0.3; at 0 it is muted); a tick-volume spike is at or above the percentile (scalp 0.95, intraday 0.95, swing 0.97, range 0.95), thin liquidity at or below (scalp 0.2, intraday 0.2, swing 0.2, range 0.2), and a spread spike at the median spread times (scalp 1.8, intraday 2, swing 2.5, range 2); a sweep is searched for over minutes (scalp 60, intraday 180, swing 720, range 180), equal extremes lie within ATR multiples (scalp 0.05, intraday 0.05, swing 0.08, range 0.05), and a volume node is a profile bin at or above the percentile (scalp 0.85, intraday 0.85, swing 0.85, range 0.85) of a profile over minutes (scalp 240, intraday 1440, swing 7200, range 1440). Each lens is scored on its own readings: below a hit share of 0.45 over its last 60 readings lens A, and below 0.45 over 100 lens B, drops to the floor of its weight in every mode at once, and only a newer doctrine lifts it.",
+      "template": "The Positioning & Liquidity analyst reads two lenses, in the trading mode in force, and never opens, sizes or prices a position. Lens A, positioning from the weekly CFTC report read only after its release, is a Decision Engine witness at a share of the witness weight (scalp {positioning.de_weight_scalp}, intraday {positioning.de_weight_intraday}, swing {positioning.de_weight_swing}, range {positioning.de_weight_range}; the other witnesses scale by one less that share); the crowd is stretched when managed money's net sits at or beyond the percentile (scalp {positioning.crowd_pctl_scalp}, intraday {positioning.crowd_pctl_intraday}, swing {positioning.crowd_pctl_swing}, range {positioning.crowd_pctl_range}, the low side one less) among the 156 weekly nets before it, and the week's flow counts beyond its standard deviations (scalp {positioning.flow_z_scalp}, intraday {positioning.flow_z_intraday}, swing {positioning.flow_z_swing}, range {positioning.flow_z_range}). Lens B, liquidity from the broker's own one-minute bars against its hour of the week, is weighed in the councils (scalp {liquidity.council_weight_scalp}, intraday {liquidity.council_weight_intraday}, swing {liquidity.council_weight_swing}, range {liquidity.council_weight_range}; at 0 it is muted); a tick-volume spike is at or above the percentile (scalp {liquidity.spike_pctl_scalp}, intraday {liquidity.spike_pctl_intraday}, swing {liquidity.spike_pctl_swing}, range {liquidity.spike_pctl_range}), thin liquidity at or below (scalp {liquidity.thin_pctl_scalp}, intraday {liquidity.thin_pctl_intraday}, swing {liquidity.thin_pctl_swing}, range {liquidity.thin_pctl_range}), and a spread spike at the median spread times (scalp {liquidity.spread_widen_scalp}, intraday {liquidity.spread_widen_intraday}, swing {liquidity.spread_widen_swing}, range {liquidity.spread_widen_range}); a sweep is searched for over minutes (scalp {liquidity.sweep_lookback_min_scalp}, intraday {liquidity.sweep_lookback_min_intraday}, swing {liquidity.sweep_lookback_min_swing}, range {liquidity.sweep_lookback_min_range}), equal extremes lie within ATR multiples (scalp {liquidity.pool_tol_atr_scalp}, intraday {liquidity.pool_tol_atr_intraday}, swing {liquidity.pool_tol_atr_swing}, range {liquidity.pool_tol_atr_range}), and a volume node is a profile bin at or above the percentile (scalp {liquidity.hvn_pctl_scalp}, intraday {liquidity.hvn_pctl_intraday}, swing {liquidity.hvn_pctl_swing}, range {liquidity.hvn_pctl_range}) of a profile over minutes (scalp {liquidity.profile_window_min_scalp}, intraday {liquidity.profile_window_min_intraday}, swing {liquidity.profile_window_min_swing}, range {liquidity.profile_window_min_range}). Each lens is scored on its own readings: below a hit share of {positioning.score_floor} over its last {positioning.score_window} readings lens A, and below {liquidity.score_floor} over {liquidity.score_window} lens B, drops to the floor of its weight in every mode at once, and only a newer doctrine lifts it.",
+      "anchors": [
+        {
+          "fact": "positioning.de_weight_scalp",
+          "value": 0.02,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.de_weight_intraday",
+          "value": 0.03,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.de_weight_swing",
+          "value": 0.05,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.de_weight_range",
+          "value": 0.03,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.crowd_pctl_scalp",
+          "value": 0.9,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.crowd_pctl_intraday",
+          "value": 0.9,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.crowd_pctl_swing",
+          "value": 0.9,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.crowd_pctl_range",
+          "value": 0.9,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.flow_z_scalp",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.flow_z_intraday",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.flow_z_swing",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.flow_z_range",
+          "value": 1,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.council_weight_scalp",
+          "value": 0.4,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.council_weight_intraday",
+          "value": 0.3,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.council_weight_swing",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.council_weight_range",
+          "value": 0.3,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spike_pctl_scalp",
+          "value": 0.95,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spike_pctl_intraday",
+          "value": 0.95,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spike_pctl_swing",
+          "value": 0.97,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spike_pctl_range",
+          "value": 0.95,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.thin_pctl_scalp",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.thin_pctl_intraday",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.thin_pctl_swing",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.thin_pctl_range",
+          "value": 0.2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spread_widen_scalp",
+          "value": 1.8,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spread_widen_intraday",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spread_widen_swing",
+          "value": 2.5,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.spread_widen_range",
+          "value": 2,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.sweep_lookback_min_scalp",
+          "value": 60,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.sweep_lookback_min_intraday",
+          "value": 180,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.sweep_lookback_min_swing",
+          "value": 720,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.sweep_lookback_min_range",
+          "value": 180,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.pool_tol_atr_scalp",
+          "value": 0.05,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.pool_tol_atr_intraday",
+          "value": 0.05,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.pool_tol_atr_swing",
+          "value": 0.08,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.pool_tol_atr_range",
+          "value": 0.05,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.hvn_pctl_scalp",
+          "value": 0.85,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.hvn_pctl_intraday",
+          "value": 0.85,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.hvn_pctl_swing",
+          "value": 0.85,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.hvn_pctl_range",
+          "value": 0.85,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.profile_window_min_scalp",
+          "value": 240,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.profile_window_min_intraday",
+          "value": 1440,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.profile_window_min_swing",
+          "value": 7200,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.profile_window_min_range",
+          "value": 1440,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.score_floor",
+          "value": 0.45,
+          "format": "num"
+        },
+        {
+          "fact": "positioning.score_window",
+          "value": 60,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.score_floor",
+          "value": 0.45,
+          "format": "num"
+        },
+        {
+          "fact": "liquidity.score_window",
+          "value": 100,
+          "format": "num"
+        }
+      ],
+      "source": "xauusd docs/RFC_POSITIONING_LIQUIDITY.md §7, §8; src/lens-policy.mjs LENS_KNOBS and LENS_SCORE_KNOBS",
+      "since": "2026-11-20"
     }
   ],
   "retired": [

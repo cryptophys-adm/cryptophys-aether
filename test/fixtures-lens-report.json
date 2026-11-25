@@ -1,0 +1,103 @@
+{
+  "schema": "cryptophys.lens-report.v1",
+  "agent": "Positioning & Liquidity",
+  "generated_at": "2026-11-20T11:00:00.000Z",
+  "doctrine_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "lenses": {
+    "positioning": {
+      "enabled": true,
+      "weights": {
+        "scalp": {
+          "weight": 0.02,
+          "source": "anchor"
+        },
+        "intraday": {
+          "weight": 0.03,
+          "source": "anchor"
+        },
+        "swing": {
+          "weight": 0.08,
+          "source": "aether"
+        },
+        "range": {
+          "weight": 0.03,
+          "source": "anchor"
+        }
+      },
+      "score": {
+        "hits": 33,
+        "misses": 27,
+        "n": 60,
+        "share": 0.55,
+        "kinds": {
+          "reading_4h": {
+            "hits": 33,
+            "misses": 27,
+            "share": 0.55
+          }
+        },
+        "score_floor": 0.45,
+        "score_window": 60
+      },
+      "floored": false,
+      "floor_event": null,
+      "series": "disaggregated",
+      "report_age_days": 3,
+      "stale": false
+    },
+    "liquidity": {
+      "enabled": true,
+      "weights": {
+        "scalp": {
+          "weight": 0,
+          "source": "floor_rollback"
+        },
+        "intraday": {
+          "weight": 0,
+          "source": "floor_rollback"
+        },
+        "swing": {
+          "weight": 0,
+          "source": "floor_rollback"
+        },
+        "range": {
+          "weight": 0,
+          "source": "floor_rollback"
+        }
+      },
+      "score": {
+        "hits": 40,
+        "misses": 60,
+        "n": 100,
+        "share": 0.4,
+        "kinds": {
+          "sweep": {
+            "hits": 14,
+            "misses": 20,
+            "share": 0.412
+          },
+          "spread_block": {
+            "hits": 13,
+            "misses": 20,
+            "share": 0.394
+          },
+          "maker": {
+            "hits": 13,
+            "misses": 20,
+            "share": 0.394
+          }
+        },
+        "score_floor": 0.45,
+        "score_window": 100
+      },
+      "floored": true,
+      "floor_event": {
+        "at": "2026-11-19T12:00:00.000Z",
+        "share": 0.38,
+        "n": 104
+      },
+      "baseline": "insufficient",
+      "baseline_weeks": 1
+    }
+  }
+}

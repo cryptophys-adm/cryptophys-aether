@@ -46,12 +46,29 @@ text with a model.
      can update the canon.
    - `propose`: every seat involved agrees.
 3. **Proposal to Cerebrum** (`consensus.propose`). At most 3 a session. The same rule and values are
-   not proposed again for 7 days.
+   not proposed again for 7 days while the owner has not decided or has refused. A proposal Cerebrum
+   executed reads `executed` in `council_proposals` from the next hourly sync (`markExecutedProposals`)
+   and no longer counts: if its drift comes back, a canon change dropped it, and it is proposed again.
    - `amend_doctrine` (routine): operational facts only, each inside its hard bound
      (platform `control-plane-shared/src/doctrine.ts`). It executes after the vote, in consensus mode
      `routine` or higher.
    - `amend_constitution` (critical): a constitutional rule, or a fact without a bound (for example a
      guardrail list). It executes only after one owner approval click, in mode `critical`.
+   Before the cooldown is read, the council reads its own open proposals of the last 7 days back through
+   `consensus.status` (tier 0, its own proposals only, at most 50 ids a call, ids of the kernel's shape
+   `cns_<uuid>`; `syncProposalStatuses`):
+   - `rejected` or `expired` is stored on the row; a final row is never overwritten and not read again.
+     Both keep the 7-day cooldown, like an undecided proposal (orchestrator ruling on aether#45: re-asking
+     an ignored proposal every ~48 h would ask the owner about 15 times a month per rule).
+   - Only `executed` lifts the cooldown. `consensus.status` never writes executed; only the propose answer
+     (a routine amendment executed at the vote) or `markExecutedProposals` (once the amendment is in
+     `doctrine_applied`) does, so a transient `doctrine.status` failure cannot lead to the same values
+     being proposed twice.
+   - `not_found` (unknown to the platform) and `pending_owner` change nothing, so the cooldown holds
+     (fail closed). A `pending_owner` past its `expires_at` counts as pending until the platform's sweep
+     makes it read `expired`.
+   - A denial (the capability not granted yet) changes nothing and waits 6 hours
+     (`aether_meta` key `council_status_backoff_until`), as `corrections.read` does.
 4. **Cerebrum executes.**
    - The kernel records the amendment in `doctrine_amendments`, together with the audit event
      `doctrine.amended`.
@@ -68,10 +85,14 @@ text with a model.
 
 ## Omega's policy (B-12, 2026-11-11)
 
-- `KnowledgeIngress.omegaPolicy()` gives the xauusd Worker the Omega facts of the doctrine in force
-  (risk %, positions, daily loss %, spread, signal age), each within its fact's bound.
-- An amendment the council proposed and Cerebrum executed therefore reaches Omega's settings within an
-  hour, but only while the owner's switch `OMEGA_POLICY_AUTO` is on in xauusd.
+- `KnowledgeIngress.omegaPolicy()` gives the xauusd Worker the Omega facts of the doctrine in force,
+  each within its fact's bound: the spread and the signal age, and since ADR-0020 Amendment 10
+  (aether#40, 2026-11-22) the limits per account profile (`risk_pct_<profile>`,
+  `max_daily_loss_pct_<profile>`, `max_positions_<profile>`) as information. The single risk %,
+  positions and daily loss % are no longer in it.
+- An executed amendment of the spread or the signal age therefore reaches Omega's settings within an
+  hour, but only while the owner's switch `OMEGA_POLICY_AUTO` is on in xauusd. xauusd does not apply the
+  per-profile values: its own profile caps (`effectiveLimits`) and the owner's settings decide the risk.
 
 ## Switches
 

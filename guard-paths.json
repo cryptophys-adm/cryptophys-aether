@@ -1,5 +1,5 @@
 {
-  "$comment": "Aether's guard paths (owner 2026-11-14), in the style of the platform's CRITICAL_PATHS (cryptophys-cloud-platform workers/control-plane-shared/src/guard-paths.ts): a change that touches a path matched here needs the owner's click or merge (AGENTS.md, \"How agents may change Aether\"). Each pattern is a JavaScript regular expression over the repository-relative path; the first match gives the reason. test/guard-paths.test.mjs checks that every pattern matches real files. This file is itself a guard path.",
+  "$comment": "Aether's guard paths (owner 2026-11-14), in the style of the platform's CRITICAL_PATHS (cryptophys-cloud-platform workers/control-plane-shared/src/guard-paths.ts): a change that touches a path matched here merges only as AGENTS.md (\"How agents may change Aether\", \"Who merges\") allows: CI green on the exact head and the orchestrator's review, plus the owner's explicit OK for a constitutional anchor (owner 2026-11-22; until then the owner's click or merge). Each pattern is a JavaScript regular expression over the repository-relative path; the first match gives the reason. test/guard-paths.test.mjs checks that every pattern matches real files. This file is itself a guard path.",
   "schema": "aether-guard-paths.v1",
   "paths": [
     { "pattern": "^canon/", "reason": "doctrine_canon" },
