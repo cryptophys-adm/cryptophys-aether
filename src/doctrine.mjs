@@ -242,6 +242,13 @@ export function validateFacts(payload, { now = Date.now() } = {}) {
   return { measured_at: new Date(at).toISOString(), seats };
 }
 
+/**
+ * Facts a report never moves (coordinator ruling on aether#47, AE2): the code reports what it does, so a drift here
+ * means it acts without the amendment in force. The amendment is raised on the owner's request, never by a report;
+ * the council refuses the drift, and its warning shows it.
+ */
+export const OWNER_RAISED_FACTS = Object.freeze(["parity.mizan_before_parity"]);
+
 const actionFor = (rule, facts) => (rule.class !== "constitutional" && facts.every((f) => Object.hasOwn(DOCTRINE_BOUNDS, f)) ? "amend_doctrine" : "amend_constitution");
 
 /**
@@ -281,6 +288,9 @@ export function councilReview({ rules, latest, previous, session, canon = CANON 
     }
     const facts = drifts.map((d) => d.fact);
     const action = actionFor(r, facts);
+    for (const d of drifts) {
+      if (OWNER_RAISED_FACTS.includes(d.fact)) { seats.aether = "refuse"; why.push(`${d.fact} is raised only on the owner's request, never by a report`); }
+    }
     if (action === "amend_doctrine") {
       for (const d of drifts) {
         const problem = boundProblem(d.fact, d.observed);

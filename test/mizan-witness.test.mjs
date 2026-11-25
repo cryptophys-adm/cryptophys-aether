@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CANON } from "../src/canon.generated.mjs";
-import { MIZAN_BOUNDS, DOCTRINE_BOUNDS, boundProblem, councilReview, effectiveDoctrine, validateFacts, FACTS_SCHEMA, canonShort } from "../src/doctrine.mjs";
+import { MIZAN_BOUNDS, OWNER_RAISED_FACTS, DOCTRINE_BOUNDS, boundProblem, councilReview, effectiveDoctrine, validateFacts, FACTS_SCHEMA, canonShort } from "../src/doctrine.mjs";
 
 const NOW = Date.parse("2026-12-15T03:52:00Z");
 const H = 3_600_000;
@@ -66,24 +66,30 @@ test("MW3. the Knowledge Council amends a Mizan weight inside 0-0.04 as routine;
   assert.match(wild.reasons.join(" "), /outside 50-200/);
 });
 
-test("MW4. the parity exception is canon text that stays off; turning it on is the owner's amend_constitution click", () => {
+test("MW4. the parity exception is canon text that stays off; a report never raises the owner's click", () => {
   const rule = ruleOf("parity_trust_only");
   assert.equal(rule.class, "constitutional");
   const a = rule.anchors.find((x) => x.fact === "parity.mizan_before_parity");
   assert.deepEqual(a, { fact: "parity.mizan_before_parity", value: false, format: "bool" }, "not applied: off in the canon");
   assert.match(rule.rule, /Mizan witness voting before its parity \(off\): when on, it votes while its parity group runs alongside, and a mismatch freezes its weight at 0 until 24 consecutive candles match again\./);
   assert.ok(rule.rule.startsWith("Local engine trust comes only from the autonomous parity registry (24 consecutive candles"), "the rule itself is unchanged");
-  const on = review({ "parity.mizan_before_parity": true }).find((r) => r.rule === "parity_trust_only");
-  assert.equal(on.status, "propose");
-  assert.equal(on.action, "amend_constitution", "never routine");
-  assert.deepEqual(on.proposal.params.values, { "parity.mizan_before_parity": true });
-  assert.deepEqual(on.proposal.params.previous, { "parity.mizan_before_parity": false });
-  assert.match(on.text, /before its parity \(on\)/);
-  // Once Cerebrum executed it after the owner's click, the doctrine in force says on.
+  assert.deepEqual(OWNER_RAISED_FACTS, ["parity.mizan_before_parity"]);
+  // xauusd reports false until the amendment is in force: in sync, nothing proposed.
+  assert.equal(review({ "parity.mizan_before_parity": false }).find((r) => r.rule === "parity_trust_only").status, "in_sync");
+  // A report of true without the amendment is the code acting ahead of the owner: refused, never a proposal.
+  const ahead = review({ "parity.mizan_before_parity": true }).find((r) => r.rule === "parity_trust_only");
+  assert.equal(ahead.status, "refused");
+  assert.equal(ahead.proposal, undefined);
+  assert.match(ahead.reasons.join(" "), /raised only on the owner's request/);
+  // Once Cerebrum executed the owner's amend_constitution, the doctrine in force says on, and a true report is in sync.
   const applied = [{ amendment_id: "cns_x", rule: "parity_trust_only", action: "amend_constitution", canon: canonShort(), values: { "parity.mizan_before_parity": true }, executed_at: "2026-12-15T04:00:00.000Z" }];
   const live = effectiveDoctrine(applied).find((r) => r.id === "parity_trust_only");
   assert.match(live.rule, /before its parity \(on\)/);
   assert.equal(live.amended.action, "amend_constitution");
+  const rules = effectiveDoctrine(applied).map((r) => ({ ...r, template: ruleOf(r.id).template, anchors: r.anchors.map((x) => ({ fact: x.fact, format: x.format, value: x.value })) }));
+  const on = { "parity.mizan_before_parity": true };
+  const after = councilReview({ rules, latest: seatsOf(report(NOW, on)), previous: seatsOf(report(NOW - H, on)), session: "kc_x-1" }).find((r) => r.rule === "parity_trust_only");
+  assert.equal(after.status, "in_sync");
 });
 
 test("MW5. until xauusd MZ1 reports the Mizan facts, both rules read unreported (AE2 merges with MZ1)", () => {

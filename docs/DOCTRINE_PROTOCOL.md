@@ -105,8 +105,10 @@ auto mati". xauusd builds the witness (MZ1); Aether holds its doctrine.
   them as routine, the weights only inside 0 to 0.04.
 - **`parity_trust_only`** (constitutional) gains the text of one exception, anchored by `parity.mizan_before_parity`,
   `off` in the canon: when on, the witness votes while its parity group runs alongside, and a mismatch freezes it at 0
-  until 24 consecutive matches. Once xauusd reports it on, measured twice, the council proposes `amend_constitution`,
-  and only the owner's click executes it.
+  until 24 consecutive matches. xauusd reports what its code does, so `false` until the amendment is in force. The
+  `amend_constitution` is raised on the owner's request, shows as `pending_owner`, and only the owner's click executes
+  it. A report never raises it: a drift of `parity.mizan_before_parity` (`OWNER_RAISED_FACTS`) is refused, with a
+  warning.
 - **Timing.** Until xauusd reports the eight facts, both rules read `unreported`, so this lands with MZ1.
 
 ## Switches
