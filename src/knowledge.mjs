@@ -236,6 +236,117 @@ export function paramCandidates(cards, { now = Date.now(), proposed = new Set(),
   return out;
 }
 
+// ---------------------------------------------------------------- the shadow verdicts' feedback loop
+
+/**
+ * xauusd's shadow verdicts on Aether's proposals (the platform's knowledge.verdict write-back, PF3, live since
+ * 2026-11-24): knowledge.status carries each proposal's `item_version` and `latest_verdict` ({ verdict, terminal,
+ * reason, evidence, created_at } or null). Owner 2026-11-25: "harus dibuat jalurnya untuk feedback loop". These
+ * verdicts end a test with the item not helping; `not_tested` with an `untestable.*` rule means xauusd cannot test it.
+ */
+export const NEGATIVE_TERMINAL_VERDICTS = Object.freeze(["not_better", "worse", "holdout_failed"]);
+export const UNTESTABLE_RULE_PREFIX = "untestable.";
+
+/**
+ * Pure: whether xauusd's shadow arm cannot test an item of this audience (the owner's request of 2026-11-25 to close
+ * the feedback loop, "harus dibuat jalurnya untuk feedback loop"; xauusd's not_tested rules untestable.moderator_only,
+ * untestable.chart_4h_only and, soon, untestable.agent_inactive): an item for
+ * the moderator only, an item for the four-hour chart (240) only, or an item for an Omega audience (the execution
+ * agent, which xauusd's shadow knowledge arm does not run). Candidates encode both in `audience`:
+ * `{ agents: [agent ids], charts: [chart ids "15" | "60" | "240" | "1D"] }` (baseItem). This is not a limit on
+ * learning: it avoids proposals that cannot be tested.
+ */
+export function isUntestableShape(item) {
+  const agents = Array.isArray(item?.audience?.agents) ? item.audience.agents.map(String) : [];
+  const charts = Array.isArray(item?.audience?.charts) ? item.audience.charts.map(String) : [];
+  if (agents.length && agents.every((a) => a === "moderator")) return true;
+  if (charts.length && charts.every((c) => c === "240")) return true;
+  return agents.some((a) => a === "omega" || a.startsWith("omega.") || a.startsWith("omega_") || a.startsWith("omega-"));
+}
+
+/** An item's audience as one key (agents and charts, each sorted): the "shape" xauusd's untestable rules are about. */
+export function shapeKey(item) {
+  const sorted = (x) => (Array.isArray(x) ? x.map(String).sort() : []);
+  return JSON.stringify([sorted(item?.audience?.agents), sorted(item?.audience?.charts)]);
+}
+
+/**
+ * Pure: the latest_verdict knowledge.status gives, as Aether records it (D1 knowledge_items.detail.latest_verdict):
+ * the verdict, whether it is terminal, a bounded reason, and of the evidence only its `rule` token (no number of
+ * xauusd's evidence is stored). null when there is no verdict, undefined when the value is malformed.
+ */
+export function recordedVerdict(v) {
+  if (v === null) return null;
+  if (!v || typeof v !== "object" || typeof v.verdict !== "string") return undefined;
+  const rule = typeof v.evidence?.rule === "string" ? v.evidence.rule.slice(0, 80) : null;
+  return {
+    verdict: v.verdict.slice(0, 40), terminal: v.terminal === true,
+    reason: typeof v.reason === "string" ? v.reason.slice(0, 300) : null,
+    evidence: rule ? { rule } : null,
+    created_at: typeof v.created_at === "string" ? v.created_at.slice(0, 40) : null
+  };
+}
+/**
+ * An untestable.agent_inactive verdict says the agent had no rows for a while, not that the shape can never be
+ * tested, so it counts for 14 days only (the xauusd coordinator's review of #46): after that the curator may
+ * propose for the agent again and xauusd tests it afresh. A verdict without a readable time counts as current.
+ */
+export const AGENT_INACTIVE_RULE = "untestable.agent_inactive";
+export const AGENT_INACTIVE_SKIP_MS = 14 * 24 * 60 * 60 * 1000;
+const untestableVerdict = (v, now = Date.now()) => {
+  if (v?.verdict !== "not_tested" || !String(v?.evidence?.rule ?? "").startsWith(UNTESTABLE_RULE_PREFIX)) return false;
+  const at = Date.parse(v?.created_at ?? "");
+  return !(v.evidence.rule === AGENT_INACTIVE_RULE && Number.isFinite(at) && now - at > AGENT_INACTIVE_SKIP_MS);
+};
+
+/**
+ * Pure: the index the curator screens its candidates with, from its recorded rows ({ item_id, version, item_json,
+ * detail }): per item the verdict of its newest version that has one, the items and shapes xauusd called untestable.
+ */
+export function verdictIndex(rows, now = Date.now()) {
+  const latest = new Map(), untestableItems = new Set(), untestableShapes = new Set();
+  for (const r of rows || []) {
+    let detail = null;
+    try { detail = JSON.parse(r.detail); } catch { continue; }
+    const v = detail && typeof detail === "object" ? detail.latest_verdict : null;
+    if (!v || typeof v.verdict !== "string") continue;
+    const version = Number(r.version) || 0;
+    const prev = latest.get(r.item_id);
+    if (!prev || version > prev.version) latest.set(r.item_id, { version, verdict: v });
+    if (untestableVerdict(v, now)) {
+      untestableItems.add(r.item_id);
+      try { untestableShapes.add(shapeKey(JSON.parse(r.item_json))); } catch { /* the item id still counts */ }
+    }
+  }
+  return { latest, untestableItems, untestableShapes };
+}
+
+/**
+ * Pure: why the curator does not propose a candidate, by xauusd's verdicts: "untestable" (this item, or one of the
+ * same shape, came back not_tested with an untestable.* rule), "already_failed" (the item's latest verdict is a
+ * terminal not_better, worse or holdout_failed), or null. Aether has no notion of a revised version with fresh
+ * evidence (a new version redraws the same rule over an overlapping window), so a failed item is not proposed again
+ * in any version. A live, retired, collecting, inconclusive or other not_tested verdict, or none, changes nothing.
+ * This is not a limit on learning: it avoids proposals that cannot be tested or that already failed.
+ */
+export function verdictSkip(candidate, index) {
+  if (!index) return null;
+  if (index.untestableItems.has(candidate.item_id) || index.untestableShapes.has(shapeKey(candidate))) return "untestable";
+  const v = index.latest.get(candidate.item_id)?.verdict;
+  if (v && v.terminal === true && NEGATIVE_TERMINAL_VERDICTS.includes(v.verdict)) return "already_failed";
+  return null;
+}
+
+/** The curator's screen: untestable shapes and xauusd's verdicts (isUntestableShape, verdictSkip). */
+export function curatorScreen(index) {
+  return (candidate) => (isUntestableShape(candidate) ? "untestable" : verdictSkip(candidate, index));
+}
+
+async function loadVerdictIndex(db, agentId, now = Date.now()) {
+  const rows = (await db.prepare("SELECT item_id, version, item_json, detail FROM knowledge_items WHERE agent_id = ? AND proposal_id IS NOT NULL AND detail IS NOT NULL").bind(agentId).all()).results || [];
+  return verdictIndex(rows, now);
+}
+
 // ---------------------------------------------------------------- ledger, proposals and review status
 
 async function loadCards(db, now, days) {
@@ -273,14 +384,18 @@ async function kernelRoom(db, agentId, now) {
 /**
  * Proposes every candidate that may be proposed. None is held back by a limit of Aether's own: past the
  * kernel's quota a candidate is `carried` (proposed in a later hour; candidates are drawn again from the
- * cards each run, so carrying never loses one).
+ * cards each run, so carrying never loses one). `screen(candidate)` names why a candidate is not proposed
+ * ("untestable" or "already_failed", counted as such; curatorScreen): not a limit on learning, it avoids proposals
+ * that cannot be tested or that already failed.
  */
-async function proposeAll(env, agentId, candidates, now) {
+async function proposeAll(env, agentId, candidates, now, screen = () => null) {
   const db = env.AETHER_DB;
   const at = new Date(now).toISOString();
-  const results = { proposed: 0, refused: 0, skipped: 0, carried: 0, stopped: null };
+  const results = { proposed: 0, refused: 0, skipped: 0, carried: 0, untestable: 0, already_failed: 0, stopped: null };
   let room = await kernelRoom(db, agentId, now);
   for (const candidate of candidates) {
+    const why = screen(candidate);
+    if (why === "untestable" || why === "already_failed") { results[why] += 1; continue; }
     const gate = await mayPropose(db, candidate.item_id, now);
     if (!gate.ok) { results.skipped += 1; continue; }
     if (results.stopped || room <= 0) { results.carried += 1; continue; }
@@ -319,22 +434,47 @@ export async function curationCarried(env) {
   } catch { return false; }
 }
 
-/** Follows the review of every open proposal (knowledge.status, tier 0) and records the decisions. */
+/**
+ * Follows the review of every open proposal (knowledge.status, tier 0) and records the decisions, and (PF3, since
+ * 2026-11-24) each proposal's latest shadow verdict from xauusd, in the same D1 record: knowledge_items.detail
+ * holds { decided_by, reason, decided_at } once decided and `latest_verdict` (recordedVerdict) once xauusd sent one.
+ * An expired text item is still shadow-tested (AUTO_SHADOW_KINDS), so its verdict is followed too. A verdict alone
+ * changes neither the status nor updated_at (the rejection cooldown and the pack order stay as they were).
+ */
 export async function syncReviews(env, { now = Date.now() } = {}) {
   const db = env.AETHER_DB;
   if (!db) return { status: "unavailable" };
   await ensureSchema(db);
-  const changed = { approved: 0, rejected: 0, expired: 0 };
+  const changed = { approved: 0, rejected: 0, expired: 0, verdicts: 0 };
+  const at = new Date(now).toISOString();
   for (const agentId of [CURATOR, CALIBRATOR]) {
-    const open = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND status IN ('pending', 'approved')").bind(agentId).first();
+    const open = await db.prepare("SELECT COUNT(*) AS n FROM knowledge_items WHERE agent_id = ? AND proposal_id IS NOT NULL AND status IN ('pending', 'approved', 'expired')").bind(agentId).first();
     if (!Number(open?.n)) continue;
     const r = await syscall(env, agentId, "knowledge.status", {});
     if (r?.outcome !== "succeeded") continue;
     for (const p of r.result?.proposals || []) {
-      if (!["approved", "rejected", "expired"].includes(p.status) || !p.proposal_id) continue;
-      const res = await db.prepare("UPDATE knowledge_items SET status = ?, detail = ?, updated_at = ? WHERE proposal_id = ? AND status <> ?")
-        .bind(p.status, JSON.stringify({ decided_by: p.decided_by ?? null, reason: p.reason ?? null, decided_at: p.decided_at ?? null }), new Date(now).toISOString(), p.proposal_id, p.status).run();
-      if (Number(res?.meta?.changes)) changed[p.status] += 1;
+      if (!p?.proposal_id) continue;
+      const decided = ["approved", "rejected", "expired"].includes(p.status);
+      const verdict = Object.hasOwn(p, "latest_verdict") ? recordedVerdict(p.latest_verdict) : undefined;
+      if (!decided && verdict === undefined) continue;
+      const row = await db.prepare("SELECT status, detail FROM knowledge_items WHERE proposal_id = ? AND agent_id = ?").bind(p.proposal_id, agentId).first();
+      if (!row) continue;
+      let prev = {};
+      try { const d = JSON.parse(row.detail); if (d && typeof d === "object" && !Array.isArray(d)) prev = d; } catch { /* no detail yet */ }
+      const statusChanged = decided && row.status !== p.status;
+      const next = { ...prev };
+      if (statusChanged) Object.assign(next, { decided_by: p.decided_by ?? null, reason: p.reason ?? null, decided_at: p.decided_at ?? null });
+      if (verdict !== undefined) next.latest_verdict = verdict;
+      const verdictChanged = verdict !== undefined && JSON.stringify(prev.latest_verdict ?? null) !== JSON.stringify(verdict);
+      if (!statusChanged && !verdictChanged) continue;
+      if (statusChanged) {
+        const res = await db.prepare("UPDATE knowledge_items SET status = ?, detail = ?, updated_at = ? WHERE proposal_id = ? AND status <> ?")
+          .bind(p.status, JSON.stringify(next), at, p.proposal_id, p.status).run();
+        if (Number(res?.meta?.changes)) changed[p.status] += 1;
+      } else {
+        await db.prepare("UPDATE knowledge_items SET detail = ? WHERE proposal_id = ?").bind(JSON.stringify(next), p.proposal_id).run();
+      }
+      if (verdictChanged) changed.verdicts += 1;
     }
   }
   return { status: "ok", ...changed };
@@ -354,7 +494,7 @@ function runReport(who, { now, cards, candidates, results }) {
     kind: "knowledge_audit", severity: "info",
     subject: candidates ? `${who} run: ${candidates} candidate${candidates === 1 ? "" : "s"}, ${proposed} proposed, ${carried} carried` : `${who} run: no candidate in ${cards} cards`,
     ai_status: "deterministic",
-    body: { advisory: ADVISORY, run_at: new Date(now).toISOString(), cards, candidates, proposed, carried, skipped: results.skipped, refused: results.refused, stopped: results.stopped }
+    body: { advisory: ADVISORY, run_at: new Date(now).toISOString(), cards, candidates, proposed, carried, skipped: results.skipped, refused: results.refused, untestable: results.untestable, already_failed: results.already_failed, stopped: results.stopped }
   };
 }
 async function publishCuratorRun(env, run) { return syscall(env, CURATOR, "reports.publish", runReport("Curator", run)); }
@@ -396,7 +536,12 @@ export async function runCuration(env, { now = Date.now(), daily = false } = {})
     weighting = weightingCandidate(latest?.report, { cardIds: hourly, pending: pendingFamilies.has(WEIGHTING_FAMILY), proposed: proposedIds, canon: CANON });
   } catch { weighting = null; }
   if (weighting) calibratorCandidates.unshift(weighting);
-  const curator = await proposeAll(env, CURATOR, curatorCandidates, now);
+  // The feedback loop (owner 2026-11-25, "harus dibuat jalurnya untuk feedback loop"): the curator does not propose
+  // what xauusd cannot shadow-test or what its shadow verdict already failed (curatorScreen). Not a limit on
+  // learning: it avoids proposals that cannot be tested or that already failed; every other candidate goes on.
+  let verdicts = null;
+  try { verdicts = await loadVerdictIndex(db, CURATOR, now); } catch { verdicts = null; }
+  const curator = await proposeAll(env, CURATOR, curatorCandidates, now, curatorScreen(verdicts));
   const calibrator = await proposeAll(env, CALIBRATOR, calibratorCandidates, now);
   // Carried past the kernel's quota: the next hour runs again. After a denial it waits for the next day (rule 6).
   const carried = [curator, calibrator].reduce((n, r) => n + (r.stopped ? 0 : r.carried), 0);

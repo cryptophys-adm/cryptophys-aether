@@ -85,7 +85,7 @@ test("E3. no caution below the sample, without a gap, outside the window, or wit
   assert.deepEqual(executionCandidates({ ...report(LONDON), schema: "x" }, { now: NOW, cardIdsFor: cardsFor }), []);
 });
 
-test("E4. ingest, the overview and the daily curation: the report is kept, summarised, and its caution proposed with the cards Aether holds", async () => {
+test("E4. ingest, the overview and the daily curation: the report is kept, summarised, and its caution drawn with the cards Aether holds; not proposed, as xauusd cannot shadow-test an Omega audience (owner 2026-11-25)", async () => {
   resetExecutionSchemaCacheForTests(); resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
   const db = d1();
   assert.deepEqual(await storeExecutionReport(db, { ...report(LONDON), trades: [{ bad: true }] }, { now: NOW }), { accepted: false, reason: "trade_invalid:0" });
@@ -104,8 +104,16 @@ test("E4. ingest, the overview and the daily curation: the report is kept, summa
   } };
   const run = await runCuration({ AETHER_DB: db, AGENTS }, { now: NOW });
   assert.equal(run.status, "ok");
+  // The curator still draws both cautions with the cards Aether holds ...
+  const { executionCuratorCandidates } = await import("../src/execution.mjs");
+  const drawn = await executionCuratorCandidates(db, { now: NOW });
+  assert.deepEqual(drawn.map((c) => c.item_id).sort(), ["k-exec-plan-scalp-london", "k-exec-session-scalp-london"]);
+  assert.ok(drawn.every((c) => c.provenance.card_ids.length >= 10 && c.audience.agents.includes("omega")));
+  assert.equal(run.candidates.curator, 2);
+  // ... and proposes neither: their audience is Omega, which xauusd's shadow arm cannot test (isUntestableShape).
   const exec = proposals.filter((p) => p.item.item_id.startsWith("k-exec-"));
-  assert.deepEqual(exec.map((p) => [p.agentId, p.item.item_id]).sort(), [["aether-curator", "k-exec-plan-scalp-london"], ["aether-curator", "k-exec-session-scalp-london"]]);
+  assert.deepEqual(exec, []);
+  assert.deepEqual([run.curator.proposed, run.curator.untestable], [0, 2]);
   const overview = await aetherOverview({ AETHER_DB: db }, { now: NOW });
   assert.equal(overview.execution.trades, 40);
   assert.equal(overview.execution.modes.scalp.signals, 40);

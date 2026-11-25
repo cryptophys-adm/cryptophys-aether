@@ -156,7 +156,9 @@ test("owner 2026-11-14: every candidate is proposed (beyond the old 3 a run), pa
   resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
   const db = d1();
   const checks = ["calibration_talk", "data_scope", "natural_language"];
-  const cards = hourly(7, (i) => ({ compliance: i % 8 === 0 ? ["r37_funnel", "prophet", "moderator"].flatMap((agent) => checks.map((check) => ({ agent, check }))) : [] }));
+  // Three non-moderator agents: a moderator-only reminder is not proposed (xauusd cannot shadow-test it, isUntestableShape).
+  const speakers = [{ id: "r37_funnel", stance: "WAIT" }, { id: "prophet", stance: "SELL" }, { id: "gmi", stance: "WAIT" }, { id: "moderator", stance: "WAIT" }];
+  const cards = hourly(7, (i) => ({ agents: speakers, compliance: i % 8 === 0 ? ["r37_funnel", "prophet", "gmi"].flatMap((agent) => checks.map((check) => ({ agent, check }))) : [] }));
   for (let i = 0; i < cards.length; i += 50) await ingestCards(db, cards.slice(i, i + 50), { now: NOW });
   const k = kernel();
   const env = { AETHER_DB: db, AGENTS: k };
@@ -190,10 +192,10 @@ test("owner 2026-11-14: the curator and the calibrator each leave one recorded r
   assert.equal(k.reports.length, 2, "exactly one report per agent");
   assert.deepEqual(k.reports, [{
     agent: "aether-curator", kind: "knowledge_audit", severity: "info", subject: "Curator run: 1 candidate, 1 proposed, 0 carried", ai_status: "deterministic",
-    body: { advisory: "advisory only; not an order", run_at: new Date(NOW).toISOString(), cards: cards.length, candidates: 1, proposed: 1, carried: 0, skipped: 0, refused: 0, stopped: null }
+    body: { advisory: "advisory only; not an order", run_at: new Date(NOW).toISOString(), cards: cards.length, candidates: 1, proposed: 1, carried: 0, skipped: 0, refused: 0, untestable: 0, already_failed: 0, stopped: null }
   }, {
     agent: "aether-calibrator", kind: "knowledge_audit", severity: "info", subject: `Calibrator run: no candidate in ${cards.length} cards`, ai_status: "deterministic",
-    body: { advisory: "advisory only; not an order", run_at: new Date(NOW).toISOString(), cards: cards.length, candidates: 0, proposed: 0, carried: 0, skipped: 0, refused: 0, stopped: null }
+    body: { advisory: "advisory only; not an order", run_at: new Date(NOW).toISOString(), cards: cards.length, candidates: 0, proposed: 0, carried: 0, skipped: 0, refused: 0, untestable: 0, already_failed: 0, stopped: null }
   }]);
   // A carry run (not daily) reports nothing; the next daily run reports once again.
   const carry = await runCuration(env, { now: NOW + H });
@@ -251,8 +253,8 @@ test("reviews come back through knowledge.status; approved items form the learne
   assert.deepEqual(auto.items.map((it) => [it.kind, it.review]), [["role_reminder", "auto"]]);
   k.proposals[0].status = "approved"; k.proposals[0].decided_by = "owner@example.com";
   k.proposals[1].status = "rejected"; k.proposals[1].reason = "too early";
-  assert.deepEqual(await syncReviews(env, { now: NOW + H }), { status: "ok", approved: 1, rejected: 1, expired: 0 });
-  assert.deepEqual(await syncReviews(env, { now: NOW + 2 * H }), { status: "ok", approved: 0, rejected: 0, expired: 0 }, "idempotent");
+  assert.deepEqual(await syncReviews(env, { now: NOW + H }), { status: "ok", approved: 1, rejected: 1, expired: 0, verdicts: 0 });
+  assert.deepEqual(await syncReviews(env, { now: NOW + 2 * H }), { status: "ok", approved: 0, rejected: 0, expired: 0, verdicts: 0 }, "idempotent");
   const pack = await learnedPack(env);
   assert.equal(pack.version, "cryptophys.learned-pack.v1");
   assert.match(pack.sha256, /^[0-9a-f]{64}$/);
@@ -272,7 +274,7 @@ test("without the kernel binding nothing is proposed and nothing throws", async 
   const r = await runCuration({ AETHER_DB: db }, { now: NOW });
   assert.equal(r.curator.proposed, 0);
   assert.equal(r.curator.stopped, "unavailable");
-  assert.deepEqual(await syncReviews({ AETHER_DB: db }, { now: NOW }), { status: "ok", approved: 0, rejected: 0, expired: 0 });
+  assert.deepEqual(await syncReviews({ AETHER_DB: db }, { now: NOW }), { status: "ok", approved: 0, rejected: 0, expired: 0, verdicts: 0 });
 });
 
 test("curation progress: each rule's have-versus-need, and ready exactly when the rule itself drafts the item", async () => {
@@ -327,4 +329,140 @@ test("autonomous shadow testing: an undecided text item stays in the pack, a rej
   put("k-p", 1, "param_candidate", "pending");
   const pack = await learnedPack(env);
   assert.deepEqual(pack.items.map((it) => [it.item_id, it.version, it.review]), [["k-a", 2, "auto"], ["k-c", 1, "approved"]]);
+});
+
+// ---------------------------------------------------------------- the shadow verdicts' feedback loop (owner 2026-11-25)
+
+test("feedback loop: isUntestableShape names the audiences xauusd cannot shadow-test (moderator only, the 240 chart only, Omega)", async () => {
+  const { isUntestableShape } = await import("../src/knowledge.mjs");
+  const shape = (agents, charts) => ({ audience: { agents, charts } });
+  assert.equal(isUntestableShape(shape(["moderator"], [])), true, "moderator only");
+  assert.equal(isUntestableShape(shape(["moderator"], ["60"])), true, "moderator only, on a testable chart");
+  assert.equal(isUntestableShape(shape(["prophet", "moderator"], ["240"])), true, "the four-hour chart only");
+  assert.equal(isUntestableShape(shape(["omega", "moderator"], ["15"])), true, "an Omega audience");
+  assert.equal(isUntestableShape(shape(["prophet", "moderator"], ["60"])), false);
+  assert.equal(isUntestableShape(shape(["r37_funnel", "moderator"], [])), false, "a role reminder for a room agent, every chart");
+  assert.equal(isUntestableShape(shape(["prophet", "moderator"], ["60", "240"])), false, "the 240 chart among others");
+  assert.equal(isUntestableShape(shape(["prophet", "moderator"], ["1D"])), false);
+  // The curator's own rules: a caution on the 240 chart and a role reminder for the moderator are drawn, and untestable.
+  const four = Array.from({ length: 400 }, (_, i) => card(i < 200 ? "240" : "60", NOW - (400 - i) * H, { session: "london", outcomes: { "agent:prophet": { result: i < 200 ? (i % 4 ? "miss" : "hit") : (i % 4 ? "hit" : "miss") } } }));
+  const cautions = cautionCandidates(four, { now: NOW });
+  assert.ok(cautions.some((c) => c.audience.charts[0] === "240"), "a four-hour caution is drawn");
+  assert.ok(cautions.filter((c) => c.audience.charts[0] === "240").every(isUntestableShape));
+  const drift = roleDriftCandidates(hourly(7, (i) => ({ compliance: i % 8 === 0 ? [{ agent: "moderator", check: "natural_language" }, { agent: "r37_funnel", check: "calibration_talk" }] : [] })), { now: NOW });
+  assert.deepEqual(drift.map((c) => [c.item_id, isUntestableShape(c)]).sort(), [["k-role-moderator-natural-language", true], ["k-role-r37-funnel-calibration-talk", false]]);
+});
+
+test("feedback loop: verdictSkip on xauusd's verdicts; live, collecting, inconclusive, a testable not_tested or none change nothing", async () => {
+  const { verdictSkip, verdictIndex, NEGATIVE_TERMINAL_VERDICTS } = await import("../src/knowledge.mjs");
+  const item = { item_id: "k-a", audience: { agents: ["prophet", "moderator"], charts: ["60"] } };
+  const row = (item_id, version, v, audience = item.audience) => ({ item_id, version, item_json: JSON.stringify({ item_id, version, audience }), detail: JSON.stringify({ latest_verdict: v }) });
+  const v = (verdict, terminal, rule) => ({ verdict, terminal, reason: verdict, evidence: rule ? { rule } : {}, created_at: "2026-11-24T00:00:00Z" });
+  assert.deepEqual([...NEGATIVE_TERMINAL_VERDICTS], ["not_better", "worse", "holdout_failed"]);
+  for (const bad of NEGATIVE_TERMINAL_VERDICTS) assert.equal(verdictSkip(item, verdictIndex([row("k-a", 1, v(bad, true))])), "already_failed", bad);
+  for (const [verdict, terminal] of [["live", true], ["retired", true], ["collecting", false], ["inconclusive", false]]) {
+    assert.equal(verdictSkip(item, verdictIndex([row("k-a", 1, v(verdict, terminal))])), null, verdict);
+  }
+  assert.equal(verdictSkip(item, verdictIndex([row("k-a", 1, v("not_tested", false, "budget.later"))])), null, "a not_tested without an untestable rule");
+  assert.equal(verdictSkip(item, verdictIndex([row("k-a", 1, null)])), null, "no verdict");
+  assert.equal(verdictSkip(item, verdictIndex([])), null, "no record");
+  assert.equal(verdictSkip(item, null), null);
+  // The item's latest verdict is that of its newest version with one.
+  assert.equal(verdictSkip(item, verdictIndex([row("k-a", 1, v("collecting", false)), row("k-a", 2, v("worse", true))])), "already_failed");
+  assert.equal(verdictSkip(item, verdictIndex([row("k-a", 2, v("collecting", false)), row("k-a", 1, v("worse", true))])), null);
+  // not_tested with an untestable.* rule: that item, and any item of the same audience.
+  const at = Date.parse("2026-11-25T00:00:00Z");
+  const untestable = verdictIndex([row("k-b", 1, v("not_tested", false, "untestable.agent_inactive"))], at);
+  assert.equal(verdictSkip({ item_id: "k-b", audience: { agents: ["gmi"], charts: [] } }, untestable), "untestable", "the same item id");
+  assert.equal(verdictSkip({ item_id: "k-c", audience: { agents: ["moderator", "prophet"], charts: ["60"] } }, untestable), "untestable", "the same shape, in any order");
+  assert.equal(verdictSkip({ item_id: "k-d", audience: { agents: ["prophet", "moderator"], charts: ["15"] } }, untestable), null, "another shape");
+  // untestable.agent_inactive counts for 14 days only (AGENT_INACTIVE_SKIP_MS); other untestable.* rules never lapse.
+  const { AGENT_INACTIVE_SKIP_MS } = await import("../src/knowledge.mjs");
+  const later = Date.parse("2026-11-24T00:00:00Z") + AGENT_INACTIVE_SKIP_MS + 1;
+  const lapsed = verdictIndex([row("k-b", 1, v("not_tested", false, "untestable.agent_inactive"))], later);
+  assert.equal(verdictSkip({ item_id: "k-b", audience: { agents: ["gmi"], charts: [] } }, lapsed), null, "an agent_inactive skip lapses after 14 days");
+  assert.equal(verdictSkip({ item_id: "k-c", audience: item.audience }, lapsed), null, "its shape too");
+  const edge = verdictIndex([row("k-b", 1, v("not_tested", false, "untestable.agent_inactive"))], later - 1);
+  assert.equal(verdictSkip({ item_id: "k-b", audience: { agents: ["gmi"], charts: [] } }, edge), "untestable", "still counts at exactly 14 days");
+  const rule = verdictIndex([row("k-e", 1, v("not_tested", false, "untestable.moderator_only"))], later);
+  assert.equal(verdictSkip({ item_id: "k-e", audience: item.audience }, rule), "untestable", "a structural untestable rule never lapses");
+});
+
+/** Role drift cards: the r37 funnel breaks `checks` in one room in eight over 7 days (one candidate per check). */
+async function driftDb(checks) {
+  resetSchemaCacheForTests(); resetKnowledgeSchemaCacheForTests();
+  const db = d1();
+  const cards = hourly(7, (i) => ({ compliance: i % 8 === 0 ? checks.map((check) => ({ agent: "r37_funnel", check })) : [] }));
+  for (let i = 0; i < cards.length; i += 50) await ingestCards(db, cards.slice(i, i + 50), { now: NOW });
+  return db;
+}
+
+test("feedback loop: knowledge.status brings each proposal's latest verdict back into its D1 record, expired items included", async () => {
+  const db = await driftDb(["calibration_talk"]);
+  const k = kernel();
+  const env = { AETHER_DB: db, AGENTS: k };
+  await runCuration(env, { now: NOW });
+  const p = k.proposals[0];
+  p.latest_verdict = null;
+  assert.deepEqual(await syncReviews(env, { now: NOW + H }), { status: "ok", approved: 0, rejected: 0, expired: 0, verdicts: 0 }, "a null verdict on a pending item records nothing new");
+  p.latest_verdict = { verdict: "collecting", terminal: false, reason: "collecting rooms", evidence: { rule: "collecting.min_rooms", rooms: 12 }, created_at: "2026-12-10T13:00:00Z" };
+  assert.deepEqual(await syncReviews(env, { now: NOW + H }), { status: "ok", approved: 0, rejected: 0, expired: 0, verdicts: 1 });
+  const read = () => db.raw.prepare("SELECT status, detail, updated_at FROM knowledge_items WHERE proposal_id = ?").get(p.proposal_id);
+  const before = read();
+  assert.equal(before.status, "pending");
+  assert.equal(before.updated_at, new Date(NOW).toISOString(), "a verdict alone changes neither status nor updated_at");
+  assert.deepEqual(JSON.parse(before.detail), { latest_verdict: { verdict: "collecting", terminal: false, reason: "collecting rooms", evidence: { rule: "collecting.min_rooms" }, created_at: "2026-12-10T13:00:00Z" } }, "of the evidence only its rule token");
+  // Expired, then a terminal verdict: both kept in the one record; the expired item is still followed.
+  p.status = "expired"; p.decided_at = "2026-12-11T00:00:00Z";
+  assert.deepEqual(await syncReviews(env, { now: NOW + 2 * H }), { status: "ok", approved: 0, rejected: 0, expired: 1, verdicts: 0 });
+  p.latest_verdict = { verdict: "not_better", terminal: true, reason: "no better than active", evidence: {}, created_at: "2026-12-12T00:00:00Z" };
+  assert.deepEqual(await syncReviews(env, { now: NOW + 3 * H }), { status: "ok", approved: 0, rejected: 0, expired: 0, verdicts: 1 });
+  assert.deepEqual(JSON.parse(read().detail), { latest_verdict: { verdict: "not_better", terminal: true, reason: "no better than active", evidence: null, created_at: "2026-12-12T00:00:00Z" }, decided_by: null, reason: null, decided_at: "2026-12-11T00:00:00Z" });
+  assert.deepEqual(await syncReviews(env, { now: NOW + 4 * H }), { status: "ok", approved: 0, rejected: 0, expired: 0, verdicts: 0 }, "idempotent");
+});
+
+test("feedback loop: an item whose latest verdict is a terminal not_better, worse or holdout_failed is not proposed again", async () => {
+  for (const verdict of ["not_better", "worse", "holdout_failed"]) {
+    const db = await driftDb(["calibration_talk"]);
+    const k = kernel();
+    const env = { AETHER_DB: db, AGENTS: k };
+    assert.equal((await runCuration(env, { now: NOW })).curator.proposed, 1);
+    Object.assign(k.proposals[0], { status: "expired", latest_verdict: { verdict, terminal: true, reason: verdict, evidence: {}, created_at: "2026-12-10T13:00:00Z" } });
+    await syncReviews(env, { now: NOW + H });
+    const run = await runCuration(env, { now: NOW + 2 * H, daily: true });
+    assert.deepEqual([run.candidates.curator, run.curator.proposed, run.curator.already_failed, run.curator.untestable], [1, 0, 1, 0], verdict);
+    assert.equal(k.proposals.length, 1, `${verdict}: no version 2`);
+    assert.deepEqual([k.reports[0].body.candidates, k.reports[0].body.already_failed], [1, 1], "the run report counts it");
+  }
+});
+
+test("feedback loop: a not_tested verdict with an untestable rule stops that item and its shape; other items go on", async () => {
+  const db = await driftDb(["calibration_talk", "data_scope"]);
+  const k = kernel();
+  const env = { AETHER_DB: db, AGENTS: k };
+  assert.equal((await runCuration(env, { now: NOW })).curator.proposed, 2);
+  const first = k.proposals.find((p) => p.item_id === "k-role-r37-funnel-calibration-talk");
+  Object.assign(first, { status: "expired", latest_verdict: { verdict: "not_tested", terminal: false, reason: "agent inactive", evidence: { rule: "untestable.agent_inactive" }, created_at: "2026-12-10T13:00:00Z" } });
+  const other = k.proposals.find((p) => p.item_id === "k-role-r37-funnel-data-scope");
+  other.status = "expired";
+  await syncReviews(env, { now: NOW + H });
+  // Both items have the same audience (the r37 funnel and the moderator, every chart): neither is proposed again.
+  const run = await runCuration(env, { now: NOW + 2 * H });
+  assert.deepEqual([run.curator.proposed, run.curator.untestable, run.curator.already_failed], [0, 2, 0]);
+  assert.equal(k.proposals.length, 2);
+});
+
+test("feedback loop: with a live or collecting verdict, or none, a candidate is proposed as before", async () => {
+  for (const latest of [undefined, null, { verdict: "collecting", terminal: false }, { verdict: "live", terminal: true }, { verdict: "inconclusive", terminal: false }]) {
+    const db = await driftDb(["calibration_talk"]);
+    const k = kernel();
+    const env = { AETHER_DB: db, AGENTS: k };
+    await runCuration(env, { now: NOW });
+    k.proposals[0].status = "expired";
+    if (latest !== undefined) k.proposals[0].latest_verdict = latest && { ...latest, reason: "x", evidence: {}, created_at: "2026-12-10T13:00:00Z" };
+    await syncReviews(env, { now: NOW + H });
+    const run = await runCuration(env, { now: NOW + 2 * H });
+    assert.deepEqual([run.curator.proposed, run.curator.untestable, run.curator.already_failed], [1, 0, 0], JSON.stringify(latest));
+    assert.deepEqual(k.proposals.map((p) => [p.item_id, p.item_version]), [["k-role-r37-funnel-calibration-talk", 1], ["k-role-r37-funnel-calibration-talk", 2]]);
+  }
 });
