@@ -286,13 +286,24 @@ export function recordedVerdict(v) {
     created_at: typeof v.created_at === "string" ? v.created_at.slice(0, 40) : null
   };
 }
-const untestableVerdict = (v) => v?.verdict === "not_tested" && String(v?.evidence?.rule ?? "").startsWith(UNTESTABLE_RULE_PREFIX);
+/**
+ * An untestable.agent_inactive verdict says the agent had no rows for a while, not that the shape can never be
+ * tested, so it counts for 14 days only (the xauusd coordinator's review of #46): after that the curator may
+ * propose for the agent again and xauusd tests it afresh. A verdict without a readable time counts as current.
+ */
+export const AGENT_INACTIVE_RULE = "untestable.agent_inactive";
+export const AGENT_INACTIVE_SKIP_MS = 14 * 24 * 60 * 60 * 1000;
+const untestableVerdict = (v, now = Date.now()) => {
+  if (v?.verdict !== "not_tested" || !String(v?.evidence?.rule ?? "").startsWith(UNTESTABLE_RULE_PREFIX)) return false;
+  const at = Date.parse(v?.created_at ?? "");
+  return !(v.evidence.rule === AGENT_INACTIVE_RULE && Number.isFinite(at) && now - at > AGENT_INACTIVE_SKIP_MS);
+};
 
 /**
  * Pure: the index the curator screens its candidates with, from its recorded rows ({ item_id, version, item_json,
  * detail }): per item the verdict of its newest version that has one, the items and shapes xauusd called untestable.
  */
-export function verdictIndex(rows) {
+export function verdictIndex(rows, now = Date.now()) {
   const latest = new Map(), untestableItems = new Set(), untestableShapes = new Set();
   for (const r of rows || []) {
     let detail = null;
@@ -302,7 +313,7 @@ export function verdictIndex(rows) {
     const version = Number(r.version) || 0;
     const prev = latest.get(r.item_id);
     if (!prev || version > prev.version) latest.set(r.item_id, { version, verdict: v });
-    if (untestableVerdict(v)) {
+    if (untestableVerdict(v, now)) {
       untestableItems.add(r.item_id);
       try { untestableShapes.add(shapeKey(JSON.parse(r.item_json))); } catch { /* the item id still counts */ }
     }
@@ -331,9 +342,9 @@ export function curatorScreen(index) {
   return (candidate) => (isUntestableShape(candidate) ? "untestable" : verdictSkip(candidate, index));
 }
 
-async function loadVerdictIndex(db, agentId) {
+async function loadVerdictIndex(db, agentId, now = Date.now()) {
   const rows = (await db.prepare("SELECT item_id, version, item_json, detail FROM knowledge_items WHERE agent_id = ? AND proposal_id IS NOT NULL AND detail IS NOT NULL").bind(agentId).all()).results || [];
-  return verdictIndex(rows);
+  return verdictIndex(rows, now);
 }
 
 // ---------------------------------------------------------------- ledger, proposals and review status
@@ -529,7 +540,7 @@ export async function runCuration(env, { now = Date.now(), daily = false } = {})
   // what xauusd cannot shadow-test or what its shadow verdict already failed (curatorScreen). Not a limit on
   // learning: it avoids proposals that cannot be tested or that already failed; every other candidate goes on.
   let verdicts = null;
-  try { verdicts = await loadVerdictIndex(db, CURATOR); } catch { verdicts = null; }
+  try { verdicts = await loadVerdictIndex(db, CURATOR, now); } catch { verdicts = null; }
   const curator = await proposeAll(env, CURATOR, curatorCandidates, now, curatorScreen(verdicts));
   const calibrator = await proposeAll(env, CALIBRATOR, calibratorCandidates, now);
   // Carried past the kernel's quota: the next hour runs again. After a denial it waits for the next day (rule 6).

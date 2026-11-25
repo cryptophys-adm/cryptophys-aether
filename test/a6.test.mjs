@@ -371,10 +371,21 @@ test("feedback loop: verdictSkip on xauusd's verdicts; live, collecting, inconcl
   assert.equal(verdictSkip(item, verdictIndex([row("k-a", 1, v("collecting", false)), row("k-a", 2, v("worse", true))])), "already_failed");
   assert.equal(verdictSkip(item, verdictIndex([row("k-a", 2, v("collecting", false)), row("k-a", 1, v("worse", true))])), null);
   // not_tested with an untestable.* rule: that item, and any item of the same audience.
-  const untestable = verdictIndex([row("k-b", 1, v("not_tested", false, "untestable.agent_inactive"))]);
+  const at = Date.parse("2026-11-25T00:00:00Z");
+  const untestable = verdictIndex([row("k-b", 1, v("not_tested", false, "untestable.agent_inactive"))], at);
   assert.equal(verdictSkip({ item_id: "k-b", audience: { agents: ["gmi"], charts: [] } }, untestable), "untestable", "the same item id");
   assert.equal(verdictSkip({ item_id: "k-c", audience: { agents: ["moderator", "prophet"], charts: ["60"] } }, untestable), "untestable", "the same shape, in any order");
   assert.equal(verdictSkip({ item_id: "k-d", audience: { agents: ["prophet", "moderator"], charts: ["15"] } }, untestable), null, "another shape");
+  // untestable.agent_inactive counts for 14 days only (AGENT_INACTIVE_SKIP_MS); other untestable.* rules never lapse.
+  const { AGENT_INACTIVE_SKIP_MS } = await import("../src/knowledge.mjs");
+  const later = Date.parse("2026-11-24T00:00:00Z") + AGENT_INACTIVE_SKIP_MS + 1;
+  const lapsed = verdictIndex([row("k-b", 1, v("not_tested", false, "untestable.agent_inactive"))], later);
+  assert.equal(verdictSkip({ item_id: "k-b", audience: { agents: ["gmi"], charts: [] } }, lapsed), null, "an agent_inactive skip lapses after 14 days");
+  assert.equal(verdictSkip({ item_id: "k-c", audience: item.audience }, lapsed), null, "its shape too");
+  const edge = verdictIndex([row("k-b", 1, v("not_tested", false, "untestable.agent_inactive"))], later - 1);
+  assert.equal(verdictSkip({ item_id: "k-b", audience: { agents: ["gmi"], charts: [] } }, edge), "untestable", "still counts at exactly 14 days");
+  const rule = verdictIndex([row("k-e", 1, v("not_tested", false, "untestable.moderator_only"))], later);
+  assert.equal(verdictSkip({ item_id: "k-e", audience: item.audience }, rule), "untestable", "a structural untestable rule never lapses");
 });
 
 /** Role drift cards: the r37 funnel breaks `checks` in one room in eight over 7 days (one candidate per check). */
